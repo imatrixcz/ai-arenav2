@@ -1,0 +1,330 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"lastsaas/internal/api/handlers"
+	"lastsaas/internal/auth"
+	"lastsaas/internal/config"
+	"lastsaas/internal/configstore"
+	"lastsaas/internal/db"
+	"lastsaas/internal/email"
+	"lastsaas/internal/events"
+	"lastsaas/internal/planstore"
+	"lastsaas/internal/middleware"
+	"lastsaas/internal/models"
+	"lastsaas/internal/syslog"
+	"lastsaas/internal/version"
+
+	"github.com/gorilla/mux"
+	"github.com/rs/cors"
+)
+
+func main() {
+	config.LoadEnvFile()
+
+	// Load config
+	env := config.GetEnv()
+	cfg, err := config.Load(env)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	log.Printf("Starting LastSaaS in %s mode", cfg.Environment)
+
+	// Connect to MongoDB
+	database, err := db.NewMongoDB(cfg.Database.URI, cfg.Database.Name)
+	if err != nil {
+		log.Fatalf("Failed to connect to MongoDB: %v", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		database.Close(ctx)
+	}()
+	log.Println("Connected to MongoDB")
+
+	// Load and check version
+	version.Load()
+	version.CheckAndMigrate(database)
+
+	// Seed and load configuration store
+	if err := configstore.Seed(context.Background(), database); err != nil {
+		log.Fatalf("Failed to seed config variables: %v", err)
+	}
+	cfgStore := configstore.New(database)
+	if err := cfgStore.Load(context.Background()); err != nil {
+		log.Fatalf("Failed to load config store: %v", err)
+	}
+	log.Println("Configuration store loaded")
+
+	// Seed plans
+	if err := planstore.Seed(context.Background(), database); err != nil {
+		log.Fatalf("Failed to seed plans: %v", err)
+	}
+
+	// Initialize system logger
+	sysLogger := syslog.New(database, cfgStore.Get)
+	sysLogger.Critical(context.Background(), fmt.Sprintf("System startup: LastSaaS v%s", version.Current))
+
+	// Initialize services
+	jwtService := auth.NewJWTService(
+		cfg.JWT.AccessSecret,
+		cfg.JWT.RefreshSecret,
+		cfg.JWT.AccessTTLMin,
+		cfg.JWT.RefreshTTLDay,
+	)
+	passwordService := auth.NewPasswordService()
+
+	var googleOAuth *auth.GoogleOAuthService
+	if cfg.OAuth.GoogleClientID != "" && cfg.OAuth.GoogleClientSecret != "" {
+		googleOAuth = auth.NewGoogleOAuthService(
+			cfg.OAuth.GoogleClientID,
+			cfg.OAuth.GoogleClientSecret,
+			cfg.OAuth.GoogleRedirectURL,
+		)
+		log.Println("Google OAuth configured")
+	} else {
+		log.Println("Google OAuth not configured (missing credentials)")
+	}
+
+	var emailService *email.ResendService
+	if cfg.Email.ResendAPIKey != "" {
+		emailService = email.NewResendService(
+			cfg.Email.ResendAPIKey,
+			cfg.Email.FromEmail,
+			cfg.Email.FromName,
+			cfg.App.Name,
+			cfg.Frontend.URL,
+			cfgStore.Get,
+		)
+		log.Println("Email service configured (Resend)")
+	} else {
+		log.Println("Email service not configured (missing Resend API key)")
+	}
+
+	emitter := events.NewNoopEmitter()
+
+	// Initialize middleware
+	authMiddleware := middleware.NewAuthMiddleware(jwtService, database)
+	tenantMiddleware := middleware.NewTenantMiddleware(database)
+	rateLimiter := middleware.NewRateLimiter()
+	defer rateLimiter.Stop()
+
+	// Initialize handlers
+	bootstrapHandler := handlers.NewBootstrapHandler(database)
+	authHandler := handlers.NewAuthHandler(database, jwtService, passwordService, googleOAuth, emailService, emitter, cfg.Frontend.URL, sysLogger)
+	tenantHandler := handlers.NewTenantHandler(database, emailService, emitter, sysLogger)
+	adminHandler := handlers.NewAdminHandler(database, emitter, sysLogger)
+	messageHandler := handlers.NewMessageHandler(database)
+	logHandler := handlers.NewLogHandler(database)
+	configHandler := handlers.NewConfigHandler(database, cfgStore, sysLogger)
+	plansHandler := handlers.NewPlansHandler(database, sysLogger)
+	bundlesHandler := handlers.NewBundlesHandler(database, sysLogger)
+
+	// Setup router
+	router := mux.NewRouter()
+
+	// Health check
+	router.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok"}`))
+	}).Methods("GET")
+
+	api := router.PathPrefix("/api").Subrouter()
+
+	// --- Bootstrap status (always accessible, init is CLI-only) ---
+	api.HandleFunc("/bootstrap/status", bootstrapHandler.Status).Methods("GET")
+
+	// --- Guarded routes (require system to be initialized) ---
+	guarded := api.PathPrefix("").Subrouter()
+	guarded.Use(bootstrapHandler.BootstrapGuard)
+
+	// Public auth routes
+	guarded.HandleFunc("/auth/register", rateLimiter.RateLimitHandler(
+		middleware.AccountCreationLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.Register,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/login", rateLimiter.RateLimitHandler(
+		middleware.LoginAttemptLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.Login,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/refresh", rateLimiter.RateLimitHandler(
+		middleware.TokenRefreshLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.Refresh,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/verify-email", rateLimiter.RateLimitHandler(
+		middleware.EmailVerificationLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.VerifyEmail,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/resend-verification", rateLimiter.RateLimitHandler(
+		middleware.ResendVerificationLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.ResendVerification,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/forgot-password", rateLimiter.RateLimitHandler(
+		middleware.PasswordResetLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		authHandler.ForgotPassword,
+	)).Methods("POST")
+
+	guarded.HandleFunc("/auth/reset-password", authHandler.ResetPassword).Methods("POST")
+
+	// Google OAuth routes
+	if googleOAuth != nil {
+		guarded.HandleFunc("/auth/google", rateLimiter.RateLimitHandler(
+			middleware.OAuthInitLimit,
+			func(r *http.Request) string { return middleware.GetClientIP(r) },
+			authHandler.GoogleOAuth,
+		)).Methods("GET")
+		guarded.HandleFunc("/auth/google/callback", authHandler.GoogleOAuthCallback).Methods("GET")
+	}
+
+	// Protected auth routes (require JWT)
+	protectedAuth := guarded.PathPrefix("/auth").Subrouter()
+	protectedAuth.Use(authMiddleware.RequireAuth)
+	protectedAuth.HandleFunc("/me", authHandler.GetMe).Methods("GET")
+	protectedAuth.HandleFunc("/logout", authHandler.Logout).Methods("POST")
+	protectedAuth.HandleFunc("/change-password", authHandler.ChangePassword).Methods("POST")
+	protectedAuth.HandleFunc("/accept-invitation", authHandler.AcceptInvitation).Methods("POST")
+
+	// Tenant-scoped routes (require JWT + tenant context)
+	tenantAPI := guarded.PathPrefix("/tenant").Subrouter()
+	tenantAPI.Use(authMiddleware.RequireAuth)
+	tenantAPI.Use(tenantMiddleware.RequireTenant)
+
+	tenantAPI.HandleFunc("/members", tenantHandler.ListMembers).Methods("GET")
+
+	// Invite requires admin+
+	inviteRouter := tenantAPI.PathPrefix("/members/invite").Subrouter()
+	inviteRouter.Use(middleware.RequireRole(models.RoleAdmin))
+	inviteRouter.HandleFunc("", rateLimiter.RateLimitHandler(
+		middleware.InvitationLimit,
+		func(r *http.Request) string { return middleware.GetClientIP(r) },
+		tenantHandler.InviteMember,
+	)).Methods("POST")
+
+	// Remove requires admin+
+	removeRouter := tenantAPI.PathPrefix("/members/{userId}").Subrouter()
+	removeRouter.Use(middleware.RequireRole(models.RoleAdmin))
+	removeRouter.HandleFunc("", tenantHandler.RemoveMember).Methods("DELETE")
+
+	// Role change + ownership transfer require owner
+	ownerRouter := tenantAPI.PathPrefix("/members/{userId}").Subrouter()
+	ownerRouter.Use(middleware.RequireRole(models.RoleOwner))
+	ownerRouter.HandleFunc("/role", tenantHandler.ChangeRole).Methods("PATCH")
+	ownerRouter.HandleFunc("/transfer-ownership", tenantHandler.TransferOwnership).Methods("POST")
+
+	// Message routes (require JWT, user-scoped)
+	messageAPI := guarded.PathPrefix("/messages").Subrouter()
+	messageAPI.Use(authMiddleware.RequireAuth)
+	messageAPI.HandleFunc("", messageHandler.ListMessages).Methods("GET")
+	messageAPI.HandleFunc("/unread-count", messageHandler.UnreadCount).Methods("GET")
+	messageAPI.HandleFunc("/{messageId}/read", messageHandler.MarkRead).Methods("PATCH")
+
+	// Public plans route (require JWT, not admin)
+	guarded.Handle("/plans", authMiddleware.RequireAuth(http.HandlerFunc(plansHandler.ListPlansPublic))).Methods("GET")
+
+	// Public credit bundles route (require JWT, not admin)
+	guarded.Handle("/credit-bundles", authMiddleware.RequireAuth(http.HandlerFunc(bundlesHandler.ListBundlesPublic))).Methods("GET")
+
+	// Admin routes (require JWT + root tenant + admin+ role)
+	adminAPI := guarded.PathPrefix("/admin").Subrouter()
+	adminAPI.Use(authMiddleware.RequireAuth)
+	adminAPI.Use(tenantMiddleware.RequireTenant)
+	adminAPI.Use(middleware.RequireRootTenant())
+	adminAPI.Use(middleware.RequireRole(models.RoleAdmin))
+
+	adminAPI.HandleFunc("/about", adminHandler.GetAbout).Methods("GET")
+	adminAPI.HandleFunc("/logs", logHandler.ListLogs).Methods("GET")
+	adminAPI.HandleFunc("/config", configHandler.ListConfig).Methods("GET")
+	adminAPI.HandleFunc("/config", configHandler.CreateConfig).Methods("POST")
+	adminAPI.HandleFunc("/config/{name}", configHandler.GetConfig).Methods("GET")
+	adminAPI.HandleFunc("/config/{name}", configHandler.UpdateConfig).Methods("PUT")
+	adminAPI.HandleFunc("/config/{name}", configHandler.DeleteConfig).Methods("DELETE")
+	adminAPI.HandleFunc("/tenants", adminHandler.ListTenants).Methods("GET")
+	adminAPI.HandleFunc("/tenants/{tenantId}", adminHandler.GetTenant).Methods("GET")
+	adminAPI.HandleFunc("/plans", plansHandler.ListPlans).Methods("GET")
+	adminAPI.HandleFunc("/plans/{planId}", plansHandler.GetPlan).Methods("GET")
+	adminAPI.HandleFunc("/entitlement-keys", plansHandler.ListEntitlementKeys).Methods("GET")
+	adminAPI.HandleFunc("/credit-bundles", bundlesHandler.ListBundles).Methods("GET")
+
+	// Owner-only admin actions
+	adminOwner := adminAPI.PathPrefix("").Subrouter()
+	adminOwner.Use(middleware.RequireRole(models.RoleOwner))
+	adminOwner.HandleFunc("/tenants/{tenantId}", adminHandler.UpdateTenant).Methods("PUT")
+	adminOwner.HandleFunc("/tenants/{tenantId}/status", adminHandler.UpdateTenantStatus).Methods("PATCH")
+	adminOwner.HandleFunc("/users", adminHandler.ListUsers).Methods("GET")
+	adminOwner.HandleFunc("/users/{userId}", adminHandler.GetUser).Methods("GET")
+	adminOwner.HandleFunc("/users/{userId}", adminHandler.UpdateUser).Methods("PUT")
+	adminOwner.HandleFunc("/users/{userId}/status", adminHandler.UpdateUserStatus).Methods("PATCH")
+	adminOwner.HandleFunc("/users/{userId}/role/{tenantId}", adminHandler.UpdateUserRole).Methods("PATCH")
+	adminOwner.HandleFunc("/users/{userId}/preflight-delete", adminHandler.PreflightDeleteUser).Methods("GET")
+	adminOwner.HandleFunc("/users/{userId}", adminHandler.DeleteUser).Methods("DELETE")
+	adminOwner.HandleFunc("/plans", plansHandler.CreatePlan).Methods("POST")
+	adminOwner.HandleFunc("/plans/{planId}", plansHandler.UpdatePlan).Methods("PUT")
+	adminOwner.HandleFunc("/plans/{planId}", plansHandler.DeletePlan).Methods("DELETE")
+	adminOwner.HandleFunc("/tenants/{tenantId}/plan", plansHandler.AssignPlan).Methods("PATCH")
+	adminOwner.HandleFunc("/credit-bundles", bundlesHandler.CreateBundle).Methods("POST")
+	adminOwner.HandleFunc("/credit-bundles/{bundleId}", bundlesHandler.UpdateBundle).Methods("PUT")
+	adminOwner.HandleFunc("/credit-bundles/{bundleId}", bundlesHandler.DeleteBundle).Methods("DELETE")
+
+	// CORS
+	c := cors.New(cors.Options{
+		AllowedOrigins:   []string{cfg.Frontend.URL},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Authorization", "Content-Type", "X-Tenant-ID"},
+		AllowCredentials: true,
+		MaxAge:           86400,
+	})
+
+	// Wrap with security headers + CORS
+	handler := middleware.SecurityHeaders(c.Handler(router))
+
+	// Start server
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      handler,
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 15 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	// Graceful shutdown
+	go func() {
+		log.Printf("Server listening on %s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("Shutting down server...")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced shutdown: %v", err)
+	}
+	log.Println("Server stopped")
+}

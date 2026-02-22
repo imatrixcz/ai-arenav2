@@ -1,0 +1,25 @@
+package models
+
+import (
+	"time"
+
+	"go.mongodb.org/mongo-driver/bson/primitive"
+)
+
+type LogSeverity string
+
+const (
+	LogCritical LogSeverity = "critical"
+	LogHigh     LogSeverity = "high"
+	LogMedium   LogSeverity = "medium"
+	LogLow      LogSeverity = "low"
+	LogDebug    LogSeverity = "debug"
+)
+
+type SystemLog struct {
+	ID        primitive.ObjectID  `json:"id" bson:"_id,omitempty"`
+	Severity  LogSeverity         `json:"severity" bson:"severity"`
+	Message   string              `json:"message" bson:"message"`
+	UserID    *primitive.ObjectID `json:"userId,omitempty" bson:"userId,omitempty"`
+	CreatedAt time.Time           `json:"createdAt" bson:"createdAt"`
+}

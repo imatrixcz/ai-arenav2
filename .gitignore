@@ -1,0 +1,34 @@
+# Config files with secrets
+backend/config/dev.yaml
+backend/config/prod.yaml
+
+# Go binaries
+backend/lastsaas
+backend/lastsaas-cli
+backend/lastsaas-server
+backend/server
+backend/vendor/
+/lastsaas
+/bin/
+
+# Process management
+.pids/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
