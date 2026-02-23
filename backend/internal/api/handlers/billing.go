@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -626,6 +627,8 @@ func (h *BillingHandler) AdminListTransactions(w http.ResponseWriter, r *http.Re
 }
 
 // AdminGetMetrics returns time-series business metrics for dashboard charts.
+// For revenue and ARR, today's data point is computed live from source collections
+// rather than relying on the hourly metrics snapshot, so new payments appear immediately.
 func (h *BillingHandler) AdminGetMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	q := r.URL.Query()
@@ -674,6 +677,7 @@ func (h *BillingHandler) AdminGetMetrics(w http.ResponseWriter, r *http.Request)
 		Value int64  `json:"value"`
 	}
 	var points []point
+	todayStr := time.Now().UTC().Format("2006-01-02")
 	for _, m := range metrics {
 		var val int64
 		switch metric {
@@ -690,11 +694,105 @@ func (h *BillingHandler) AdminGetMetrics(w http.ResponseWriter, r *http.Request)
 		}
 		points = append(points, point{Date: m.Date, Value: val})
 	}
+
+	// For revenue and ARR, replace today's snapshot with a live computation
+	// so new payments appear on the dashboard immediately.
+	if metric == "revenue" || metric == "arr" {
+		liveValue := h.computeLiveMetric(ctx, metric, todayStr)
+		replaced := false
+		for i, p := range points {
+			if p.Date == todayStr {
+				points[i].Value = liveValue
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			points = append(points, point{Date: todayStr, Value: liveValue})
+		}
+	}
+
 	if points == nil {
 		points = []point{}
 	}
 
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{"data": points})
+}
+
+// computeLiveMetric returns a real-time value for the given metric.
+func (h *BillingHandler) computeLiveMetric(ctx context.Context, metric, dateStr string) int64 {
+	switch metric {
+	case "revenue":
+		return h.computeLiveRevenue(ctx, dateStr)
+	case "arr":
+		return h.computeLiveARR(ctx)
+	}
+	return 0
+}
+
+// computeLiveRevenue sums today's financial transactions directly.
+func (h *BillingHandler) computeLiveRevenue(ctx context.Context, dateStr string) int64 {
+	dayStart, _ := time.Parse("2006-01-02", dateStr)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	pipeline := bson.A{
+		bson.M{"$match": bson.M{
+			"createdAt": bson.M{"$gte": dayStart, "$lt": dayEnd},
+		}},
+		bson.M{"$group": bson.M{
+			"_id":   nil,
+			"total": bson.M{"$sum": "$amountCents"},
+		}},
+	}
+
+	cursor, err := h.db.FinancialTransactions().Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0
+	}
+	defer cursor.Close(ctx)
+
+	var result []struct {
+		Total int64 `bson:"total"`
+	}
+	if cursor.All(ctx, &result) == nil && len(result) > 0 {
+		return result[0].Total
+	}
+	return 0
+}
+
+// computeLiveARR calculates ARR from active tenant subscriptions in real time.
+func (h *BillingHandler) computeLiveARR(ctx context.Context) int64 {
+	pipeline := bson.A{
+		bson.M{"$match": bson.M{
+			"billingStatus": models.BillingStatusActive,
+			"planId":        bson.M{"$ne": nil},
+		}},
+		bson.M{"$lookup": bson.M{
+			"from":         "plans",
+			"localField":   "planId",
+			"foreignField": "_id",
+			"as":           "plan",
+		}},
+		bson.M{"$unwind": bson.M{"path": "$plan", "preserveNullAndEmptyArrays": false}},
+		bson.M{"$group": bson.M{
+			"_id":               nil,
+			"totalMonthlyCents": bson.M{"$sum": "$plan.monthlyPriceCents"},
+		}},
+	}
+
+	cursor, err := h.db.Tenants().Aggregate(ctx, pipeline)
+	if err != nil {
+		return 0
+	}
+	defer cursor.Close(ctx)
+
+	var result []struct {
+		TotalMonthlyCents int64 `bson:"totalMonthlyCents"`
+	}
+	if cursor.All(ctx, &result) == nil && len(result) > 0 {
+		return result[0].TotalMonthlyCents * 12
+	}
+	return 0
 }
 
 // AdminCancelSubscription allows an admin to cancel a tenant's subscription.
