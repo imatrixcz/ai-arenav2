@@ -306,7 +306,9 @@ func (s *Service) CancelSubscriptionImmediately(ctx context.Context, subscriptio
 
 // ConstructEvent verifies a webhook signature and returns the parsed event.
 func (s *Service) ConstructEvent(payload []byte, sigHeader string) (stripe.Event, error) {
-	return webhook.ConstructEvent(payload, sigHeader, s.webhookSecret)
+	return webhook.ConstructEventWithOptions(payload, sigHeader, s.webhookSecret, webhook.ConstructEventOptions{
+		IgnoreAPIVersionMismatch: true,
+	})
 }
 
 // NextInvoiceNumber atomically generates the next invoice number.
