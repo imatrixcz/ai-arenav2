@@ -541,10 +541,6 @@ func (h *AuthHandler) ForgotPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !user.HasAuthMethod(models.AuthMethodPassword) {
-		return
-	}
-
 	resetToken := generateRandomToken()
 	verification := models.VerificationToken{
 		ID:        primitive.NewObjectID(),
@@ -610,6 +606,9 @@ func (h *AuthHandler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		"$set": bson.M{
 			"passwordHash": passwordHash,
 			"updatedAt":    now,
+		},
+		"$addToSet": bson.M{
+			"authMethods": models.AuthMethodPassword,
 		},
 	})
 
