@@ -25,6 +25,7 @@ export interface AuthProviders {
   microsoft: boolean;
   magicLink: boolean;
   passkeys: boolean;
+  mfa: boolean;
 }
 
 export interface ActiveSession {

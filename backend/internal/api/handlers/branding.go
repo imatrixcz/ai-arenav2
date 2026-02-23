@@ -73,6 +73,7 @@ func (h *BrandingHandler) GetBranding(w http.ResponseWriter, r *http.Request) {
 	}
 	authProviders["magicLink"] = h.store.Get("auth.magic_link.enabled") == "true"
 	authProviders["passkeys"] = h.store.Get("auth.passkeys.enabled") == "true"
+	authProviders["mfa"] = h.store.Get("auth.mfa.enabled") == "true"
 
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"appName":          cfg.AppName,

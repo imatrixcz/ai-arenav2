@@ -3,6 +3,7 @@ package configstore
 import (
 	"context"
 	"log"
+	"os"
 	"time"
 
 	"lastsaas/internal/db"
@@ -12,13 +13,20 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
+func appNameDefault() string {
+	if name := os.Getenv("APP_NAME"); name != "" {
+		return name
+	}
+	return "LastSaaS"
+}
+
 // SystemDefaults defines the system-level configuration variables that must always exist.
 var SystemDefaults = []models.ConfigVar{
 	{
 		Name:        "app.name",
 		Description: "Application name used in email templates and other system text (referenced as {{.AppName}} in templates)",
 		Type:        models.ConfigTypeString,
-		Value:       "LastSaaS",
+		Value:       appNameDefault(),
 		IsSystem:    true,
 	},
 	{
@@ -249,6 +257,14 @@ var SystemDefaults = []models.ConfigVar{
 		IsSystem:    true,
 	},
 	{
+		Name:        "auth.mfa.enabled",
+		Description: "Enable or disable TOTP two-factor authentication. When enabled, users can set up MFA via authenticator apps.",
+		Type:        models.ConfigTypeEnum,
+		Value:       "false",
+		Options:     `[{"label":"Enabled","value":"true"},{"label":"Disabled","value":"false"}]`,
+		IsSystem:    true,
+	},
+	{
 		Name:        "auth.sso.enabled",
 		Description: "Enable or disable SAML SSO authentication. When enabled, tenants can configure SAML identity providers.",
 		Type:        models.ConfigTypeEnum,
@@ -269,6 +285,20 @@ var SystemDefaults = []models.ConfigVar{
 		Description: "JSON array of onboarding steps to show. Valid steps: profile, team, plan.",
 		Type:        models.ConfigTypeString,
 		Value:       `["profile","team","plan"]`,
+		IsSystem:    true,
+	},
+	{
+		Name:        "billing.company_name",
+		Description: "Company name displayed on invoices. Leave blank to omit.",
+		Type:        models.ConfigTypeString,
+		Value:       "",
+		IsSystem:    true,
+	},
+	{
+		Name:        "billing.company_address",
+		Description: "Company address displayed on invoices. Use \\n for line breaks (e.g. \"123 Main St\\nNew York, NY 10001\").",
+		Type:        models.ConfigTypeString,
+		Value:       "",
 		IsSystem:    true,
 	},
 	{
