@@ -20,18 +20,76 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
-// Dispatcher listens for events and fires matching webhooks.
-type Dispatcher struct {
-	db     *db.MongoDB
-	client *http.Client
+// retryJob represents a pending webhook retry.
+type retryJob struct {
+	hook      models.Webhook
+	eventType models.WebhookEventType
+	event     events.Event
+	retry     int
+	fireAt    time.Time
 }
 
+// Dispatcher listens for events and fires matching webhooks.
+type Dispatcher struct {
+	db      *db.MongoDB
+	client  *http.Client
+	retryQ  chan retryJob
+	stopCh  chan struct{}
+	stopped chan struct{}
+}
+
+const maxRetryWorkers = 5
+const retryQueueSize = 100
+
 func NewDispatcher(database *db.MongoDB) *Dispatcher {
-	return &Dispatcher{
+	d := &Dispatcher{
 		db: database,
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		retryQ:  make(chan retryJob, retryQueueSize),
+		stopCh:  make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	go d.retryWorker()
+	return d
+}
+
+// Stop gracefully shuts down the retry worker.
+func (d *Dispatcher) Stop() {
+	close(d.stopCh)
+	<-d.stopped
+}
+
+// retryWorker processes delayed retry jobs with bounded concurrency.
+func (d *Dispatcher) retryWorker() {
+	defer close(d.stopped)
+	sem := make(chan struct{}, maxRetryWorkers)
+	for {
+		select {
+		case <-d.stopCh:
+			return
+		case job := <-d.retryQ:
+			// Wait until the scheduled fire time or shutdown
+			delay := time.Until(job.fireAt)
+			if delay > 0 {
+				select {
+				case <-time.After(delay):
+				case <-d.stopCh:
+					return
+				}
+			}
+			// Acquire semaphore slot
+			select {
+			case sem <- struct{}{}:
+			case <-d.stopCh:
+				return
+			}
+			go func(j retryJob) {
+				defer func() { <-sem }()
+				d.deliverWithRetry(context.Background(), j.hook, j.eventType, j.event, j.retry)
+			}(job)
+		}
 	}
 }
 
@@ -196,9 +254,17 @@ func (d *Dispatcher) deliverWithRetry(ctx context.Context, hook models.Webhook, 
 		log.Printf("webhooks: delivery to %s failed (status: %d, retry: %d/%d)", hook.Name, delivery.ResponseCode, retryCount, maxWebhookRetries)
 		if retryCount < maxWebhookRetries {
 			delay := retryDelays[retryCount]
-			time.AfterFunc(delay, func() {
-				d.deliverWithRetry(context.Background(), hook, eventType, event, retryCount+1)
-			})
+			select {
+			case d.retryQ <- retryJob{
+				hook:      hook,
+				eventType: eventType,
+				event:     event,
+				retry:     retryCount + 1,
+				fireAt:    time.Now().Add(delay),
+			}:
+			default:
+				log.Printf("webhooks: retry queue full, dropping retry for %s", hook.Name)
+			}
 		}
 	}
 }

@@ -50,7 +50,12 @@ export default function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(false);
   const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  const abortRef = useRef<AbortController | null>(null);
+
   const fetchLogs = useCallback(async () => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     setLoading(true);
     try {
       const params: Record<string, string | number> = { page, perPage };
@@ -61,12 +66,14 @@ export default function LogsPage() {
       if (fromDate) params.fromDate = fromDate;
       if (toDate) params.toDate = toDate;
       const data = await adminApi.listLogs(params);
-      setLogs(data.logs);
-      setTotal(data.total);
+      if (!controller.signal.aborted) {
+        setLogs(data.logs);
+        setTotal(data.total);
+      }
     } catch {
       // ignore
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [page, perPage, severity, category, search, userId, fromDate, toDate]);
 
@@ -86,14 +93,17 @@ export default function LogsPage() {
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
   useEffect(() => { fetchSeverityCounts(); }, [fetchSeverityCounts]);
 
-  // Auto-refresh
+  // Auto-refresh (pauses when tab is in background)
   useEffect(() => {
-    if (autoRefresh) {
-      autoRefreshRef.current = setInterval(() => {
+    if (!autoRefresh) return;
+
+    const tick = () => {
+      if (document.visibilityState === 'visible') {
         fetchLogs();
         fetchSeverityCounts();
-      }, 10000);
-    }
+      }
+    };
+    autoRefreshRef.current = setInterval(tick, 10000);
     return () => {
       if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
     };

@@ -179,8 +179,8 @@ func (h *AdminHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build plan name lookup
-	planCursor, _ := h.db.Plans().Find(ctx, bson.M{})
+	// Build plan name lookup (bounded to 500 plans)
+	planCursor, _ := h.db.Plans().Find(ctx, bson.M{}, options.Find().SetLimit(500))
 	planNames := map[string]string{}
 	var systemPlanName string
 	if planCursor != nil {
@@ -254,10 +254,29 @@ func (h *AdminHandler) GetTenant(w http.ResponseWriter, r *http.Request) {
 	var memberships []models.TenantMembership
 	cursor.All(r.Context(), &memberships)
 
+	// Batch-fetch all member users in a single query
+	userIDs := make([]primitive.ObjectID, len(memberships))
+	for i, m := range memberships {
+		userIDs[i] = m.UserID
+	}
+	userMap := map[primitive.ObjectID]models.User{}
+	if len(userIDs) > 0 {
+		userCursor, err := h.db.Users().Find(r.Context(), bson.M{"_id": bson.M{"$in": userIDs}})
+		if err == nil {
+			defer userCursor.Close(r.Context())
+			var users []models.User
+			if err := userCursor.All(r.Context(), &users); err == nil {
+				for _, u := range users {
+					userMap[u.ID] = u
+				}
+			}
+		}
+	}
+
 	var members []MemberResponse
 	for _, m := range memberships {
-		var user models.User
-		if err := h.db.Users().FindOne(r.Context(), bson.M{"_id": m.UserID}).Decode(&user); err != nil {
+		user, ok := userMap[m.UserID]
+		if !ok {
 			continue
 		}
 		members = append(members, MemberResponse{
@@ -613,8 +632,8 @@ func (h *AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 	var memberships []models.TenantMembership
 	cursor.All(r.Context(), &memberships)
 
-	// Build plan name lookup for membership details
-	planCursor, _ := h.db.Plans().Find(r.Context(), bson.M{})
+	// Build plan name lookup for membership details (bounded to 500 plans)
+	planCursor, _ := h.db.Plans().Find(r.Context(), bson.M{}, options.Find().SetLimit(500))
 	planNameMap := map[string]string{}
 	planIDMap := map[string]string{} // planOID hex -> planOID hex (for convenience)
 	var systemPlanName string
@@ -635,10 +654,29 @@ func (h *AdminHandler) GetUser(w http.ResponseWriter, r *http.Request) {
 		systemPlanName = "Free"
 	}
 
+	// Batch-fetch all tenants in a single query
+	tenantIDs := make([]primitive.ObjectID, len(memberships))
+	for i, m := range memberships {
+		tenantIDs[i] = m.TenantID
+	}
+	tenantMap := map[primitive.ObjectID]models.Tenant{}
+	if len(tenantIDs) > 0 {
+		tenantCursor, err := h.db.Tenants().Find(r.Context(), bson.M{"_id": bson.M{"$in": tenantIDs}})
+		if err == nil {
+			defer tenantCursor.Close(r.Context())
+			var tenants []models.Tenant
+			if err := tenantCursor.All(r.Context(), &tenants); err == nil {
+				for _, t := range tenants {
+					tenantMap[t.ID] = t
+				}
+			}
+		}
+	}
+
 	var memberDetails []UserMembershipDetail
 	for _, m := range memberships {
-		var tenant models.Tenant
-		if err := h.db.Tenants().FindOne(r.Context(), bson.M{"_id": m.TenantID}).Decode(&tenant); err != nil {
+		tenant, ok := tenantMap[m.TenantID]
+		if !ok {
 			continue
 		}
 		pName := systemPlanName

@@ -267,6 +267,7 @@ func (m *MongoDB) ensureIndexes() {
 			[]mongo.IndexModel{
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "type", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "createdAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(90 * 24 * 60 * 60)}, // TTL: 90 days
 			},
 		},
 	}

@@ -83,10 +83,29 @@ func (h *TenantHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Batch-fetch all member users in a single query
+	userIDs := make([]primitive.ObjectID, len(memberships))
+	for i, m := range memberships {
+		userIDs[i] = m.UserID
+	}
+	userMap := map[primitive.ObjectID]models.User{}
+	if len(userIDs) > 0 {
+		userCursor, err := h.db.Users().Find(r.Context(), bson.M{"_id": bson.M{"$in": userIDs}})
+		if err == nil {
+			defer userCursor.Close(r.Context())
+			var users []models.User
+			if err := userCursor.All(r.Context(), &users); err == nil {
+				for _, u := range users {
+					userMap[u.ID] = u
+				}
+			}
+		}
+	}
+
 	var members []MemberResponse
 	for _, m := range memberships {
-		var user models.User
-		if err := h.db.Users().FindOne(r.Context(), bson.M{"_id": m.UserID}).Decode(&user); err != nil {
+		user, ok := userMap[m.UserID]
+		if !ok {
 			continue
 		}
 		members = append(members, MemberResponse{

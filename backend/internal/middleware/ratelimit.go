@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"sync"
@@ -112,14 +113,19 @@ func (rl *RateLimiter) cleanupExpired() {
 	}
 }
 
-// Allow checks the rate limit for the given key. Uses MongoDB if available, falls back to in-memory.
+// Allow checks the rate limit for the given key. Uses MongoDB if available.
+// When distributed mode is configured but fails, requests are denied (fail-closed)
+// to prevent rate limit bypass across multiple machines.
 func (rl *RateLimiter) Allow(key string, config RateLimitConfig) (bool, int, time.Time) {
 	if rl.collection != nil {
 		allowed, remaining, resetTime, err := rl.allowDistributed(key, config)
 		if err == nil {
 			return allowed, remaining, resetTime
 		}
-		// Fallback to in-memory on DB error.
+		// Fail-closed: deny request when distributed check fails to prevent
+		// bypass across multiple machines.
+		log.Printf("ratelimit: distributed check failed for key %s, denying request (fail-closed): %v", key, err)
+		return false, 0, time.Now().Add(config.Window)
 	}
 	return rl.allowLocal(key, config)
 }

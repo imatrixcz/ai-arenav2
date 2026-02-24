@@ -163,24 +163,34 @@ func (s *Service) collectDaily() {
 	now := time.Now().UTC()
 	dateStr := now.Format("2006-01-02")
 
-	// DAU: distinct users with lastLoginAt in last 24 hours
+	// DAU + MAU in a single aggregation pipeline
 	dayAgo := now.Add(-24 * time.Hour)
-	dauCount, err := s.db.Users().CountDocuments(ctx, bson.M{
-		"lastLoginAt": bson.M{"$gte": dayAgo},
-	})
-	if err != nil {
-		log.Printf("Metrics: DAU count error: %v", err)
-		dauCount = 0
-	}
-
-	// MAU: distinct users with lastLoginAt in last 30 days
 	monthAgo := now.AddDate(0, 0, -30)
-	mauCount, err := s.db.Users().CountDocuments(ctx, bson.M{
-		"lastLoginAt": bson.M{"$gte": monthAgo},
-	})
+
+	dauMauPipeline := bson.A{
+		bson.M{"$match": bson.M{"lastLoginAt": bson.M{"$gte": monthAgo}}},
+		bson.M{"$group": bson.M{
+			"_id": nil,
+			"mau": bson.M{"$sum": 1},
+			"dau": bson.M{"$sum": bson.M{"$cond": bson.A{
+				bson.M{"$gte": bson.A{"$lastLoginAt", dayAgo}}, 1, 0,
+			}}},
+		}},
+	}
+	var dauCount, mauCount int64
+	dauMauCursor, err := s.db.Users().Aggregate(ctx, dauMauPipeline)
 	if err != nil {
-		log.Printf("Metrics: MAU count error: %v", err)
-		mauCount = 0
+		log.Printf("Metrics: DAU/MAU aggregation error: %v", err)
+	} else {
+		defer dauMauCursor.Close(ctx)
+		var results []struct {
+			DAU int64 `bson:"dau"`
+			MAU int64 `bson:"mau"`
+		}
+		if dauMauCursor.All(ctx, &results) == nil && len(results) > 0 {
+			dauCount = results[0].DAU
+			mauCount = results[0].MAU
+		}
 	}
 
 	// Revenue today: sum amountCents from financial_transactions created today

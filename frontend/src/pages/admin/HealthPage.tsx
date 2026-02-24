@@ -60,11 +60,13 @@ export default function HealthPage() {
     if (!loading) fetchHistorical();
   }, [timeRange, filterMode, selectedNode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-refresh every 60s
+  // Auto-refresh every 60s (pauses when tab is in background)
   useEffect(() => {
     const interval = setInterval(() => {
-      fetchCurrent();
-      fetchHistorical();
+      if (document.visibilityState === 'visible') {
+        fetchCurrent();
+        fetchHistorical();
+      }
     }, 60000);
     return () => clearInterval(interval);
   }, [fetchCurrent, fetchHistorical]);

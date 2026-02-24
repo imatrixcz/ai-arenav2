@@ -11,17 +11,18 @@ import AdminLayout from './components/AdminLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import BrandingThemeInjector from './components/BrandingThemeInjector';
 import LoadingSpinner from './components/LoadingSpinner';
+import ErrorBoundary from './components/ErrorBoundary';
 import { bootstrapApi } from './api/client';
 
-// Auth pages (eager — small, always needed)
-import LoginPage from './pages/auth/LoginPage';
-import SignupPage from './pages/auth/SignupPage';
-import VerifyEmailPage from './pages/auth/VerifyEmailPage';
-import ForgotPasswordPage from './pages/auth/ForgotPasswordPage';
-import ResetPasswordPage from './pages/auth/ResetPasswordPage';
-import AuthCallbackPage from './pages/auth/AuthCallbackPage';
-import MFAChallengePage from './pages/auth/MFAChallengePage';
-import MagicLinkVerifyPage from './pages/auth/MagicLinkVerifyPage';
+// Auth pages (lazy — not needed until user navigates to them)
+const LoginPage = lazy(() => import('./pages/auth/LoginPage'));
+const SignupPage = lazy(() => import('./pages/auth/SignupPage'));
+const VerifyEmailPage = lazy(() => import('./pages/auth/VerifyEmailPage'));
+const ForgotPasswordPage = lazy(() => import('./pages/auth/ForgotPasswordPage'));
+const ResetPasswordPage = lazy(() => import('./pages/auth/ResetPasswordPage'));
+const AuthCallbackPage = lazy(() => import('./pages/auth/AuthCallbackPage'));
+const MFAChallengePage = lazy(() => import('./pages/auth/MFAChallengePage'));
+const MagicLinkVerifyPage = lazy(() => import('./pages/auth/MagicLinkVerifyPage'));
 import BootstrapPage from './pages/BootstrapPage';
 
 // App pages (eager — core experience)
@@ -125,6 +126,7 @@ export default function App() {
                 <BrowserRouter>
                   <ScrollToTop />
                   <BrandingThemeInjector />
+                  <ErrorBoundary>
                   <Routes>
                     {/* Public landing page */}
                     <Route path="/" element={<LandingPage />} />
@@ -132,15 +134,15 @@ export default function App() {
                     {/* Public custom pages */}
                     <Route path="/p/:slug" element={<CustomPage />} />
 
-                    {/* Public auth routes */}
-                    <Route path="/login" element={<LoginPage />} />
-                    <Route path="/signup" element={<SignupPage />} />
-                    <Route path="/verify-email" element={<VerifyEmailPage />} />
-                    <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-                    <Route path="/reset-password" element={<ResetPasswordPage />} />
-                    <Route path="/auth/callback" element={<AuthCallbackPage />} />
-                    <Route path="/auth/mfa" element={<MFAChallengePage />} />
-                    <Route path="/auth/magic-link" element={<MagicLinkVerifyPage />} />
+                    {/* Public auth routes (lazy-loaded) */}
+                    <Route path="/login" element={<Suspense fallback={<LazyFallback />}><LoginPage /></Suspense>} />
+                    <Route path="/signup" element={<Suspense fallback={<LazyFallback />}><SignupPage /></Suspense>} />
+                    <Route path="/verify-email" element={<Suspense fallback={<LazyFallback />}><VerifyEmailPage /></Suspense>} />
+                    <Route path="/forgot-password" element={<Suspense fallback={<LazyFallback />}><ForgotPasswordPage /></Suspense>} />
+                    <Route path="/reset-password" element={<Suspense fallback={<LazyFallback />}><ResetPasswordPage /></Suspense>} />
+                    <Route path="/auth/callback" element={<Suspense fallback={<LazyFallback />}><AuthCallbackPage /></Suspense>} />
+                    <Route path="/auth/mfa" element={<Suspense fallback={<LazyFallback />}><MFAChallengePage /></Suspense>} />
+                    <Route path="/auth/magic-link" element={<Suspense fallback={<LazyFallback />}><MagicLinkVerifyPage /></Suspense>} />
 
                     {/* Protected app routes */}
                     <Route element={<ProtectedRoute />}>
@@ -184,6 +186,7 @@ export default function App() {
                     {/* Fallback */}
                     <Route path="*" element={<Navigate to="/dashboard" replace />} />
                   </Routes>
+                  </ErrorBoundary>
                   <Toaster
                     position="top-right"
                     toastOptions={{

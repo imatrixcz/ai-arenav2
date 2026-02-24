@@ -22,6 +22,7 @@ type ResendService struct {
 	baseURL     string
 	frontendURL string
 	getConfig   func(string) string
+	httpClient  *http.Client
 }
 
 type emailRequest struct {
@@ -40,6 +41,7 @@ func NewResendService(apiKey, fromEmail, fromName, appName, frontendURL string, 
 		baseURL:     "https://api.resend.com",
 		frontendURL: frontendURL,
 		getConfig:   getConfig,
+		httpClient:  &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
@@ -76,7 +78,7 @@ func (s *ResendService) SendEmail(to, subject, html string) error {
 		req.Header.Set("Authorization", "Bearer "+s.apiKey)
 		req.Header.Set("Content-Type", "application/json")
 
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := s.httpClient.Do(req)
 		if err != nil {
 			if attempt < maxRetries-1 {
 				log.Printf("Email network error (will retry): %v", err)

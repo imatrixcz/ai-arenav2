@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import {
   ResponsiveContainer,
   LineChart,
@@ -108,62 +109,60 @@ export default function MetricsCharts({ metrics, filterMode }: MetricsChartsProp
     );
   }
 
-  const nodeGroups = groupByNode(metrics);
-  const nodeIds = Array.from(nodeGroups.keys());
-  const isMultiNode = filterMode === 'all' && nodeIds.length > 1;
+  const { data, nodeIds, isMultiNode } = useMemo(() => {
+    const nodeGroups = groupByNode(metrics);
+    const ids = Array.from(nodeGroups.keys());
+    const multi = filterMode === 'all' && ids.length > 1;
 
-  // For aggregate/single mode, use flat data
-  const flatData = isMultiNode ? [] : aggregateByTimestamp(metrics);
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let mergedData: any[] = [];
-  if (isMultiNode) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const timeMap = new Map<string, any>();
-    for (const [nodeId, nodeMetrics] of nodeGroups) {
-      for (const m of nodeMetrics) {
-        if (!timeMap.has(m.timestamp)) {
-          timeMap.set(m.timestamp, { time: formatTime(m.timestamp) });
+    if (multi) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const timeMap = new Map<string, any>();
+      for (const [nodeId, nodeMetrics] of nodeGroups) {
+        for (const m of nodeMetrics) {
+          if (!timeMap.has(m.timestamp)) {
+            timeMap.set(m.timestamp, { time: formatTime(m.timestamp) });
+          }
+          const row = timeMap.get(m.timestamp)!;
+          row[`cpu_${nodeId}`] = m.cpu.usagePercent;
+          row[`mem_${nodeId}`] = m.memory.usedPercent;
+          row[`disk_${nodeId}`] = m.disk.usedPercent;
+          row[`req_${nodeId}`] = m.http.requestCount;
+          row[`p50_${nodeId}`] = m.http.latencyP50;
+          row[`p95_${nodeId}`] = m.http.latencyP95;
+          row[`p99_${nodeId}`] = m.http.latencyP99;
+          row[`err5xx_${nodeId}`] = m.http.errorRate5xx;
+          row[`mongoCon_${nodeId}`] = m.mongo.currentConnections;
+          row[`goroutines_${nodeId}`] = m.goRuntime.numGoroutine;
+          row[`heapMB_${nodeId}`] = m.goRuntime.heapAlloc / (1024 * 1024);
+          row[`stripeCalls_${nodeId}`] = m.integrations?.stripeApiCalls ?? 0;
+          row[`resendEmails_${nodeId}`] = m.integrations?.resendEmails ?? 0;
         }
-        const row = timeMap.get(m.timestamp)!;
-        row[`cpu_${nodeId}`] = m.cpu.usagePercent;
-        row[`mem_${nodeId}`] = m.memory.usedPercent;
-        row[`disk_${nodeId}`] = m.disk.usedPercent;
-        row[`req_${nodeId}`] = m.http.requestCount;
-        row[`p50_${nodeId}`] = m.http.latencyP50;
-        row[`p95_${nodeId}`] = m.http.latencyP95;
-        row[`p99_${nodeId}`] = m.http.latencyP99;
-        row[`err5xx_${nodeId}`] = m.http.errorRate5xx;
-        row[`mongoCon_${nodeId}`] = m.mongo.currentConnections;
-        row[`goroutines_${nodeId}`] = m.goRuntime.numGoroutine;
-        row[`heapMB_${nodeId}`] = m.goRuntime.heapAlloc / (1024 * 1024);
-        row[`stripeCalls_${nodeId}`] = m.integrations?.stripeApiCalls ?? 0;
-        row[`resendEmails_${nodeId}`] = m.integrations?.resendEmails ?? 0;
       }
+      const merged = Array.from(timeMap.entries())
+        .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
+        .map(([, v]) => v);
+      return { data: merged, nodeIds: ids, isMultiNode: true };
     }
-    mergedData = Array.from(timeMap.entries())
-      .sort(([a], [b]) => new Date(a).getTime() - new Date(b).getTime())
-      .map(([, v]) => v);
-  }
 
-  const singleData = flatData.map((m) => ({
-    time: formatTime(m.timestamp),
-    cpu: m.cpu.usagePercent,
-    mem: m.memory.usedPercent,
-    disk: m.disk.usedPercent,
-    req: m.http.requestCount,
-    p50: m.http.latencyP50,
-    p95: m.http.latencyP95,
-    p99: m.http.latencyP99,
-    err5xx: m.http.errorRate5xx,
-    mongoCon: m.mongo.currentConnections,
-    goroutines: m.goRuntime.numGoroutine,
-    heapMB: m.goRuntime.heapAlloc / (1024 * 1024),
-    stripeCalls: m.integrations?.stripeApiCalls ?? 0,
-    resendEmails: m.integrations?.resendEmails ?? 0,
-  }));
-
-  const data = isMultiNode ? mergedData : singleData;
+    const flatData = aggregateByTimestamp(metrics);
+    const single = flatData.map((m) => ({
+      time: formatTime(m.timestamp),
+      cpu: m.cpu.usagePercent,
+      mem: m.memory.usedPercent,
+      disk: m.disk.usedPercent,
+      req: m.http.requestCount,
+      p50: m.http.latencyP50,
+      p95: m.http.latencyP95,
+      p99: m.http.latencyP99,
+      err5xx: m.http.errorRate5xx,
+      mongoCon: m.mongo.currentConnections,
+      goroutines: m.goRuntime.numGoroutine,
+      heapMB: m.goRuntime.heapAlloc / (1024 * 1024),
+      stripeCalls: m.integrations?.stripeApiCalls ?? 0,
+      resendEmails: m.integrations?.resendEmails ?? 0,
+    }));
+    return { data: single, nodeIds: ids, isMultiNode: false };
+  }, [metrics, filterMode]);
   const tt = tooltipStyle();
 
   function renderLines(prefix: string) {

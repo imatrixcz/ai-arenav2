@@ -100,7 +100,9 @@ func main() {
 	if err := cfgStore.Load(context.Background()); err != nil {
 		log.Fatalf("Failed to load config store: %v", err)
 	}
-	cfgStore.StartAutoReload(context.Background(), 60*time.Second)
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+	cfgStore.StartAutoReload(appCtx, 60*time.Second)
 	log.Println("Configuration store loaded (auto-reload every 60s)")
 
 	// Seed plans
@@ -188,6 +190,7 @@ func main() {
 	}
 
 	webhookDispatcher := webhooks.NewDispatcher(database)
+	defer webhookDispatcher.Stop()
 	var emitter events.Emitter = webhookDispatcher
 
 	// Initialize middleware
@@ -622,10 +625,13 @@ func main() {
 	<-quit
 
 	log.Println("Shutting down server...")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	// Cancel app-wide context to signal background services (config reload, etc.)
+	appCancel()
 
-	if err := srv.Shutdown(ctx); err != nil {
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Fatalf("Server forced shutdown: %v", err)
 	}
 	log.Println("Server stopped")

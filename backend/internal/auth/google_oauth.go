@@ -64,7 +64,7 @@ func (s *GoogleOAuthService) GetUserInfo(ctx context.Context, token *oauth2.Toke
 	}
 	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB limit
 	if err != nil {
 		return nil, ErrOAuthUserInfo
 	}

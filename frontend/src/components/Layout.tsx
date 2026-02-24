@@ -3,13 +3,11 @@ import {
   LayoutDashboard, Users, Settings, LogOut, Shield, ChevronDown, Bell, CreditCard, Zap,
   FileText, Image, Globe, Star, Heart, BookOpen, MessageCircle, HelpCircle, Sun, Moon, Megaphone,
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { useAuth } from '../contexts/AuthContext';
 import { useTenant } from '../contexts/TenantContext';
 import { useBranding } from '../contexts/BrandingContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { messagesApi, plansApi, bundlesApi, announcementsApi } from '../api/client';
-import { getErrorMessage } from '../utils/errors';
 import ImpersonationBanner from './ImpersonationBanner';
 import { useState, useRef, useEffect } from 'react';
 import type { LucideIcon } from 'lucide-react';
@@ -41,27 +39,32 @@ export default function Layout() {
 
   useEffect(() => {
     if (isAuthenticated) {
-      messagesApi.unreadCount()
-        .then((data) => setUnreadCount(data.count))
-        .catch(() => console.debug('Failed to fetch unread count'));
-      plansApi.list()
-        .then((data) => {
-          const hasCredits = data.plans.some(p => p.usageCreditsPerMonth > 0 || p.bonusCredits > 0);
+      Promise.allSettled([
+        messagesApi.unreadCount(),
+        plansApi.list(),
+        bundlesApi.list(),
+        announcementsApi.list(),
+      ]).then(([messagesResult, plansResult, bundlesResult, announcementsResult]) => {
+        if (messagesResult.status === 'fulfilled') {
+          setUnreadCount(messagesResult.value.count);
+        }
+        if (plansResult.status === 'fulfilled') {
+          const data = plansResult.value;
+          const hasCredits = data.plans.some((p: { usageCreditsPerMonth: number; bonusCredits: number }) => p.usageCreditsPerMonth > 0 || p.bonusCredits > 0);
           setShowCredits(hasCredits);
           setTenantCredits(data.tenantSubscriptionCredits + data.tenantPurchasedCredits);
           setShowTeam(data.maxPlanUserLimit !== 1);
-        })
-        .catch(err => toast.error(getErrorMessage(err)));
-      bundlesApi.list()
-        .then((data) => setHasBundles(data.bundles.length > 0))
-        .catch(() => console.debug('Failed to fetch bundles'));
-      announcementsApi.list()
-        .then((data) => {
-          if (data.announcements.length > 0) {
-            setLatestAnnouncement({ id: data.announcements[0].id, title: data.announcements[0].title });
+        }
+        if (bundlesResult.status === 'fulfilled') {
+          setHasBundles(bundlesResult.value.bundles.length > 0);
+        }
+        if (announcementsResult.status === 'fulfilled') {
+          const anns = announcementsResult.value.announcements;
+          if (anns.length > 0) {
+            setLatestAnnouncement({ id: anns[0].id, title: anns[0].title });
           }
-        })
-        .catch(() => console.debug('Failed to fetch announcements'));
+        }
+      });
     }
   }, [isAuthenticated]);
 

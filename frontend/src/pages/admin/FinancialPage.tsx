@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { DollarSign, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi } from '../../api/client';
@@ -13,25 +13,27 @@ export default function AdminFinancialPage() {
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const loadData = () => {
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  const loadData = useCallback(() => {
     setLoading(true);
-    adminApi.listFinancialTransactions({ page, perPage: 50, search: search || undefined })
+    adminApi.listFinancialTransactions({ page, perPage: 50, search: debouncedSearch || undefined })
       .then((data) => {
         setTransactions(data.transactions);
         setTotal(data.total);
       })
       .catch(err => toast.error(getErrorMessage(err)))
       .finally(() => setLoading(false));
-  };
+  }, [page, debouncedSearch]);
 
   useEffect(() => {
     loadData();
-  }, [page]);
+  }, [loadData]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setPage(1);
-    loadData();
+    setDebouncedSearch(search);
   };
 
   const totalPages = Math.ceil(total / 50);
