@@ -300,6 +300,11 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 			h.db.Users().UpdateOne(r.Context(), bson.M{"_id": user.ID}, bson.M{
 				"$set": bson.M{"accountLockedUntil": lockUntil},
 			})
+			h.syslog.LogCatWithUser(r.Context(), models.LogHigh, models.LogCatSecurity,
+				fmt.Sprintf("Account locked after %d failed login attempts: %s", updated.FailedLoginAttempts, user.Email), user.ID)
+		} else {
+			h.syslog.LogCatWithUser(r.Context(), models.LogLow, models.LogCatAuth,
+				fmt.Sprintf("Failed login attempt for %s", user.Email), user.ID)
 		}
 		respondWithError(w, http.StatusUnauthorized, "Invalid email or password")
 		return
@@ -355,6 +360,9 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 		Data:      map[string]interface{}{"userId": user.ID.Hex()},
 	})
 
+	h.syslog.LogCatWithUser(r.Context(), models.LogLow, models.LogCatAuth,
+		fmt.Sprintf("User logged in: %s", user.Email), user.ID)
+
 	respondWithJSON(w, http.StatusOK, AuthResponse{
 		AccessToken:  accessToken,
 		RefreshToken: refreshToken,
@@ -387,6 +395,11 @@ func (h *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
 			bson.M{"tokenHash": tokenHash},
 			bson.M{"$set": bson.M{"isRevoked": true}},
 		)
+	}
+
+	if user, ok := middleware.GetUserFromContext(r.Context()); ok {
+		h.syslog.LogCatWithUser(r.Context(), models.LogLow, models.LogCatAuth,
+			fmt.Sprintf("User logged out: %s", user.Email), user.ID)
 	}
 
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Logged out successfully"})
@@ -898,6 +911,8 @@ func (h *AuthHandler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 		recoveryIdx, valid = h.totpService.ValidateRecoveryCode(req.Code, user.RecoveryCodes)
 	}
 	if !valid {
+		h.syslog.LogCatWithUser(r.Context(), models.LogMedium, models.LogCatSecurity,
+			fmt.Sprintf("Failed MFA attempt for user %s", user.Email), user.ID)
 		respondWithError(w, http.StatusUnauthorized, "Invalid code")
 		return
 	}
@@ -933,6 +948,9 @@ func (h *AuthHandler) MFAChallenge(w http.ResponseWriter, r *http.Request) {
 		Timestamp: now,
 		Data:      map[string]interface{}{"userId": user.ID.Hex()},
 	})
+
+	h.syslog.LogCatWithUser(r.Context(), models.LogLow, models.LogCatAuth,
+		fmt.Sprintf("User logged in via MFA: %s", user.Email), user.ID)
 
 	respondWithJSON(w, http.StatusOK, AuthResponse{
 		AccessToken:  accessToken,

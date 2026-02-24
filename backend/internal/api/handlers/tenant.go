@@ -247,6 +247,9 @@ func (h *TenantHandler) InviteMember(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 
+	h.syslog.LogTenantActivity(r.Context(), models.LogLow, fmt.Sprintf("Member invited: %s to %s as %s", req.Email, tenant.Name, req.Role),
+		user.ID, tenant.ID, "tenant.member_invited", map[string]interface{}{"email": req.Email, "role": string(req.Role)})
+
 	respondWithJSON(w, http.StatusCreated, map[string]string{"message": "Invitation sent"})
 }
 
@@ -322,7 +325,8 @@ func (h *TenantHandler) RemoveMember(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	h.syslog.High(r.Context(), fmt.Sprintf("Member removed: user %s from tenant %s (%s)", targetUserID.Hex(), tenant.Name, tenant.ID.Hex()))
+	h.syslog.LogTenantActivity(r.Context(), models.LogMedium, fmt.Sprintf("Member removed: user %s from tenant %s", targetUserID.Hex(), tenant.Name),
+		currentMembership.UserID, tenant.ID, "tenant.member_removed", map[string]interface{}{"targetUserId": targetUserID.Hex()})
 
 	h.events.Emit(events.Event{
 		Type:      events.EventMemberRemoved,
@@ -486,7 +490,11 @@ func (h *TenantHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 			page = n
 		}
 	}
-	if l := r.URL.Query().Get("limit"); l != "" {
+	if l := r.URL.Query().Get("perPage"); l != "" {
+		if n, err := parseInt(l); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	} else if l := r.URL.Query().Get("limit"); l != "" {
 		if n, err := parseInt(l); err == nil && n > 0 && n <= 100 {
 			limit = n
 		}
@@ -495,6 +503,9 @@ func (h *TenantHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	filter := bson.M{"tenantId": tenant.ID}
 	if action := r.URL.Query().Get("action"); action != "" {
 		filter["action"] = bson.M{"$regex": action, "$options": "i"}
+	}
+	if search := r.URL.Query().Get("search"); search != "" {
+		filter["message"] = bson.M{"$regex": search, "$options": "i"}
 	}
 
 	skip := int64((page - 1) * limit)
@@ -516,10 +527,10 @@ func (h *TenantHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 	total, _ := h.db.SystemLogs().CountDocuments(r.Context(), filter)
 
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
-		"activity": logs,
-		"total":    total,
-		"page":     page,
-		"limit":    limit,
+		"logs":  logs,
+		"total": total,
+		"page":  page,
+		"limit": limit,
 	})
 }
 
@@ -546,6 +557,12 @@ func (h *TenantHandler) UpdateTenantSettings(w http.ResponseWriter, r *http.Requ
 	}
 
 	h.db.Tenants().UpdateOne(r.Context(), bson.M{"_id": tenant.ID}, bson.M{"$set": updates})
+
+	if user, ok := middleware.GetUserFromContext(r.Context()); ok {
+		h.syslog.LogTenantActivity(r.Context(), models.LogLow, fmt.Sprintf("Tenant settings updated for %s", tenant.Name),
+			user.ID, tenant.ID, "tenant.settings_updated", nil)
+	}
+
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Settings updated"})
 }
 

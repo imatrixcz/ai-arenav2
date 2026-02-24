@@ -138,12 +138,17 @@ export interface AboutInfo {
 }
 
 export type LogSeverity = 'critical' | 'high' | 'medium' | 'low' | 'debug';
+export type LogCategory = 'auth' | 'billing' | 'admin' | 'system' | 'security' | 'tenant';
 
 export interface SystemLog {
   id: string;
   severity: LogSeverity;
+  category?: LogCategory;
   message: string;
   userId?: string;
+  tenantId?: string;
+  action?: string;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }
 

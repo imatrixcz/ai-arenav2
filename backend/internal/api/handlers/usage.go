@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
 )
 
 type UsageHandler struct {
@@ -53,34 +55,8 @@ func (h *UsageHandler) RecordUsage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Deduct credits atomically: first from subscription credits, then purchased credits.
-	// Try subscription credits first.
-	result, err := h.db.Tenants().UpdateOne(ctx,
-		bson.M{"_id": tenant.ID, "subscriptionCredits": bson.M{"$gte": int64(req.Quantity)}},
-		bson.M{"$inc": bson.M{"subscriptionCredits": -int64(req.Quantity)}},
-	)
-	if err != nil {
-		http.Error(w, `{"error":"Failed to deduct credits"}`, http.StatusInternalServerError)
-		return
-	}
-
-	if result.ModifiedCount == 0 {
-		// Not enough subscription credits — try purchased credits.
-		result, err = h.db.Tenants().UpdateOne(ctx,
-			bson.M{"_id": tenant.ID, "purchasedCredits": bson.M{"$gte": int64(req.Quantity)}},
-			bson.M{"$inc": bson.M{"purchasedCredits": -int64(req.Quantity)}},
-		)
-		if err != nil {
-			http.Error(w, `{"error":"Failed to deduct credits"}`, http.StatusInternalServerError)
-			return
-		}
-		if result.ModifiedCount == 0 {
-			http.Error(w, `{"error":"Insufficient credits"}`, http.StatusPaymentRequired)
-			return
-		}
-	}
-
-	// Record the usage event.
+	// Use a MongoDB transaction to atomically deduct credits and record the usage event.
+	// This prevents credits from being deducted without a corresponding usage record.
 	event := models.UsageEvent{
 		ID:        primitive.NewObjectID(),
 		TenantID:  tenant.ID,
@@ -91,8 +67,52 @@ func (h *UsageHandler) RecordUsage(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: time.Now(),
 	}
 
-	if _, err := h.db.UsageEvents().InsertOne(ctx, event); err != nil {
-		http.Error(w, `{"error":"Failed to record usage event"}`, http.StatusInternalServerError)
+	session, err := h.db.Client.StartSession()
+	if err != nil {
+		http.Error(w, `{"error":"Failed to start session"}`, http.StatusInternalServerError)
+		return
+	}
+	defer session.EndSession(ctx)
+
+	insufficient := false
+	_, txErr := session.WithTransaction(ctx, func(sc mongo.SessionContext) (interface{}, error) {
+		// Try subscription credits first.
+		result, err := h.db.Tenants().UpdateOne(sc,
+			bson.M{"_id": tenant.ID, "subscriptionCredits": bson.M{"$gte": int64(req.Quantity)}},
+			bson.M{"$inc": bson.M{"subscriptionCredits": -int64(req.Quantity)}},
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if result.ModifiedCount == 0 {
+			// Not enough subscription credits — try purchased credits.
+			result, err = h.db.Tenants().UpdateOne(sc,
+				bson.M{"_id": tenant.ID, "purchasedCredits": bson.M{"$gte": int64(req.Quantity)}},
+				bson.M{"$inc": bson.M{"purchasedCredits": -int64(req.Quantity)}},
+			)
+			if err != nil {
+				return nil, err
+			}
+			if result.ModifiedCount == 0 {
+				insufficient = true
+				return nil, fmt.Errorf("insufficient credits")
+			}
+		}
+
+		// Record the usage event within the same transaction.
+		if _, err := h.db.UsageEvents().InsertOne(sc, event); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	})
+
+	if insufficient {
+		http.Error(w, `{"error":"Insufficient credits"}`, http.StatusPaymentRequired)
+		return
+	}
+	if txErr != nil {
+		http.Error(w, `{"error":"Failed to deduct credits"}`, http.StatusInternalServerError)
 		return
 	}
 

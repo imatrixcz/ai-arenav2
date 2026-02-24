@@ -56,6 +56,7 @@ var (
 	MagicLinkLimit          = RateLimitConfig{MaxRequests: 5, Window: 15 * time.Minute}
 	EmailPasswordResetLimit = RateLimitConfig{MaxRequests: 3, Window: time.Hour}
 	EmailMagicLinkLimit     = RateLimitConfig{MaxRequests: 3, Window: time.Hour}
+	UsageRecordLimit        = RateLimitConfig{MaxRequests: 120, Window: time.Minute}
 )
 
 // NewRateLimiter creates an in-memory-only rate limiter (fallback mode).

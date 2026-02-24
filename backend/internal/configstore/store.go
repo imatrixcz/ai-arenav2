@@ -2,6 +2,7 @@ package configstore
 
 import (
 	"context"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -106,4 +107,24 @@ func (s *Store) Reload(ctx context.Context, name string) error {
 	defer s.mu.Unlock()
 	s.cache[v.Name] = v
 	return nil
+}
+
+// StartAutoReload periodically reloads all config vars from the database.
+// This ensures multi-machine deployments stay in sync when config is changed
+// on one machine. The goroutine stops when the context is canceled.
+func (s *Store) StartAutoReload(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := s.Load(ctx); err != nil {
+					log.Printf("configstore: auto-reload failed: %v", err)
+				}
+			}
+		}
+	}()
 }

@@ -43,6 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setMemberships([]);
     localStorage.removeItem(ACCESS_TOKEN_KEY);
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    localStorage.removeItem('lastsaas_impersonating');
     setAuthToken(null);
   }, []);
 

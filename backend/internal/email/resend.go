@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"log"
+	"math"
 	"net/http"
-	"text/template"
+	"time"
 
 	"lastsaas/internal/apicounter"
 )
@@ -58,29 +60,51 @@ func (s *ResendService) SendEmail(to, subject, html string) error {
 		return fmt.Errorf("failed to marshal email request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", s.baseURL+"/emails", bytes.NewBuffer(jsonBody))
-	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		if attempt > 0 {
+			backoff := time.Duration(math.Pow(2, float64(attempt))) * 500 * time.Millisecond
+			time.Sleep(backoff)
+			log.Printf("Email retry attempt %d/%d for %s", attempt+1, maxRetries, to)
+		}
 
-	req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	req.Header.Set("Content-Type", "application/json")
+		req, err := http.NewRequest("POST", s.baseURL+"/emails", bytes.NewBuffer(jsonBody))
+		if err != nil {
+			return fmt.Errorf("failed to create request: %w", err)
+		}
 
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("failed to send email: %w", err)
-	}
-	defer resp.Body.Close()
+		req.Header.Set("Authorization", "Bearer "+s.apiKey)
+		req.Header.Set("Content-Type", "application/json")
 
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			if attempt < maxRetries-1 {
+				log.Printf("Email network error (will retry): %v", err)
+				continue
+			}
+			return fmt.Errorf("failed to send email after %d attempts: %w", maxRetries, err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+			apicounter.ResendEmails.Add(1)
+			log.Printf("Email sent successfully to %s", to)
+			return nil
+		}
+
 		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		// Retry on transient errors (429 rate limit, 5xx server errors)
+		if (resp.StatusCode == 429 || resp.StatusCode >= 500) && attempt < maxRetries-1 {
+			log.Printf("Email API transient error (status %d, will retry): %s", resp.StatusCode, string(body))
+			continue
+		}
+
 		log.Printf("Email API error: status %d, body: %s", resp.StatusCode, string(body))
 		return fmt.Errorf("email API returned status %d", resp.StatusCode)
 	}
-
-	apicounter.ResendEmails.Add(1)
-	log.Printf("Email sent successfully to %s", to)
-	return nil
+	return fmt.Errorf("email send failed after %d attempts", maxRetries)
 }
 
 // resolveAppName returns the app name from the config system, falling back to the constructor value.

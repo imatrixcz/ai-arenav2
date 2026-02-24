@@ -74,9 +74,10 @@ export default function BuyCreditsPage() {
         </div>
       ) : (
         <div className={`grid gap-6 ${
-          bundles.length <= 3
-            ? `grid-cols-1 md:grid-cols-${bundles.length}`
-            : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
+          bundles.length === 1 ? 'grid-cols-1' :
+          bundles.length === 2 ? 'grid-cols-1 md:grid-cols-2' :
+          bundles.length === 3 ? 'grid-cols-1 md:grid-cols-3' :
+          'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
         }`}>
           {bundles.map((bundle) => (
             <div

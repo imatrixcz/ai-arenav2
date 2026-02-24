@@ -51,20 +51,30 @@ func New(database *db.MongoDB, getConfig func(string) string) *Logger {
 	return &Logger{db: database, getConfig: getConfig}
 }
 
-// log is the internal implementation shared by Log and LogWithUser.
-func (l *Logger) log(ctx context.Context, severity models.LogSeverity, message string, userID *primitive.ObjectID) {
+// shouldLog checks the configured minimum severity level.
+func (l *Logger) shouldLog(severity models.LogSeverity) bool {
 	if l.getConfig != nil {
 		minLevel := models.LogSeverity(l.getConfig("log.min_level"))
 		if minLevel == "none" {
-			return
+			return false
 		}
 		minRank, minOK := severityOrder[minLevel]
 		sevRank, sevOK := severityOrder[severity]
 		if minOK && sevOK && sevRank > minRank {
-			return
+			return false
 		}
 	}
+	return true
+}
 
+// log is the internal implementation shared by Log and LogWithUser.
+func (l *Logger) log(ctx context.Context, severity models.LogSeverity, message string, userID *primitive.ObjectID) {
+	if !l.shouldLog(severity) {
+		return
+	}
+
+	// Detect injection on raw message BEFORE sanitization
+	rawMessage := message
 	message = sanitize(message)
 
 	entry := models.SystemLog{
@@ -78,10 +88,45 @@ func (l *Logger) log(ctx context.Context, severity models.LogSeverity, message s
 		log.Printf("syslog: failed to write log: %v", err)
 	}
 
-	if detected := detectInjection(message); detected != "" {
+	if detected := detectInjection(rawMessage); detected != "" {
 		alert := models.SystemLog{
 			ID:        primitive.NewObjectID(),
 			Severity:  models.LogCritical,
+			Category:  models.LogCatSecurity,
+			Message:   "Injection attempt detected in log entry: " + detected,
+			UserID:    userID,
+			CreatedAt: time.Now(),
+		}
+		l.db.SystemLogs().InsertOne(ctx, alert)
+	}
+}
+
+// logCategorized writes a log entry with a category tag.
+func (l *Logger) logCategorized(ctx context.Context, severity models.LogSeverity, category models.LogCategory, message string, userID *primitive.ObjectID) {
+	if !l.shouldLog(severity) {
+		return
+	}
+
+	rawMessage := message
+	message = sanitize(message)
+
+	entry := models.SystemLog{
+		ID:        primitive.NewObjectID(),
+		Severity:  severity,
+		Category:  category,
+		Message:   message,
+		UserID:    userID,
+		CreatedAt: time.Now(),
+	}
+	if _, err := l.db.SystemLogs().InsertOne(ctx, entry); err != nil {
+		log.Printf("syslog: failed to write log: %v", err)
+	}
+
+	if detected := detectInjection(rawMessage); detected != "" {
+		alert := models.SystemLog{
+			ID:        primitive.NewObjectID(),
+			Severity:  models.LogCritical,
+			Category:  models.LogCatSecurity,
 			Message:   "Injection attempt detected in log entry: " + detected,
 			UserID:    userID,
 			CreatedAt: time.Now(),
@@ -98,6 +143,16 @@ func (l *Logger) Log(ctx context.Context, severity models.LogSeverity, message s
 // LogWithUser writes a log entry attributed to a specific user.
 func (l *Logger) LogWithUser(ctx context.Context, severity models.LogSeverity, message string, userID primitive.ObjectID) {
 	l.log(ctx, severity, message, &userID)
+}
+
+// LogCat writes a categorized log entry without user attribution.
+func (l *Logger) LogCat(ctx context.Context, severity models.LogSeverity, category models.LogCategory, message string) {
+	l.logCategorized(ctx, severity, category, message, nil)
+}
+
+// LogCatWithUser writes a categorized log entry attributed to a specific user.
+func (l *Logger) LogCatWithUser(ctx context.Context, severity models.LogSeverity, category models.LogCategory, message string, userID primitive.ObjectID) {
+	l.logCategorized(ctx, severity, category, message, &userID)
 }
 
 // Critical logs a critical-severity message.
@@ -137,16 +192,8 @@ func (l *Logger) HighWithUser(ctx context.Context, message string, userID primit
 
 // LogTenantActivity writes a tenant-scoped audit log entry.
 func (l *Logger) LogTenantActivity(ctx context.Context, severity models.LogSeverity, message string, userID, tenantID primitive.ObjectID, action string, metadata map[string]interface{}) {
-	if l.getConfig != nil {
-		minLevel := models.LogSeverity(l.getConfig("log.min_level"))
-		if minLevel == "none" {
-			return
-		}
-		minRank, minOK := severityOrder[minLevel]
-		sevRank, sevOK := severityOrder[severity]
-		if minOK && sevOK && sevRank > minRank {
-			return
-		}
+	if !l.shouldLog(severity) {
+		return
 	}
 
 	message = sanitize(message)
@@ -154,6 +201,7 @@ func (l *Logger) LogTenantActivity(ctx context.Context, severity models.LogSever
 	entry := models.SystemLog{
 		ID:        primitive.NewObjectID(),
 		Severity:  severity,
+		Category:  models.LogCatTenant,
 		Message:   message,
 		UserID:    &userID,
 		TenantID:  &tenantID,

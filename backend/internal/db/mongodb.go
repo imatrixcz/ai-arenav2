@@ -22,8 +22,8 @@ func NewMongoDB(uri, database string) (*MongoDB, error) {
 
 	clientOptions := options.Client().
 		ApplyURI(uri).
-		SetMaxPoolSize(500).
-		SetMinPoolSize(10).
+		SetMaxPoolSize(100).
+		SetMinPoolSize(5).
 		SetMaxConnIdleTime(5 * time.Minute)
 
 	client, err := mongo.Connect(ctx, clientOptions)
@@ -133,8 +133,9 @@ func (m *MongoDB) ensureIndexes() {
 		{
 			"system_logs",
 			[]mongo.IndexModel{
-				{Keys: bson.D{{Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "createdAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(180 * 24 * 3600)},
 				{Keys: bson.D{{Key: "severity", Value: 1}, {Key: "createdAt", Value: -1}}},
+				{Keys: bson.D{{Key: "category", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "message", Value: "text"}}},
 				{Keys: bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "createdAt", Value: -1}}},

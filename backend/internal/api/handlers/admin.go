@@ -1140,7 +1140,7 @@ func (h *AdminHandler) ImpersonateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.syslog.CriticalWithUser(r.Context(),
+	h.syslog.LogCatWithUser(r.Context(), models.LogCritical, models.LogCatSecurity,
 		fmt.Sprintf("Admin %s (%s) started impersonating user %s (%s)",
 			actingUser.Email, actingUser.ID.Hex(), targetUser.Email, targetUser.ID.Hex()),
 		actingUser.ID)

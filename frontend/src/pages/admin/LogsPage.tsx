@@ -1,8 +1,8 @@
-import { useEffect, useState, useCallback } from 'react';
-import { FileText, Search, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { FileText, Search, ChevronLeft, ChevronRight, X, RefreshCw, Download, ChevronDown, ChevronUp, Calendar } from 'lucide-react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { adminApi } from '../../api/client';
-import type { SystemLog, LogSeverity } from '../../types';
+import type { SystemLog, LogSeverity, LogCategory } from '../../types';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 const severityConfig: Record<LogSeverity, { label: string; color: string; bg: string }> = {
@@ -13,26 +13,53 @@ const severityConfig: Record<LogSeverity, { label: string; color: string; bg: st
   debug:    { label: 'Debug',    color: 'text-dark-400', bg: 'bg-dark-700/50' },
 };
 
-const PER_PAGE = 50;
+const categoryLabels: Record<LogCategory, string> = {
+  auth: 'Auth',
+  billing: 'Billing',
+  admin: 'Admin',
+  system: 'System',
+  security: 'Security',
+  tenant: 'Tenant',
+};
+
+const DATE_PRESETS = [
+  { label: 'Last hour', hours: 1 },
+  { label: 'Last 24h', hours: 24 },
+  { label: 'Last 7d', hours: 168 },
+  { label: 'Last 30d', hours: 720 },
+];
+
+const PER_PAGE_OPTIONS = [25, 50, 100];
 
 export default function LogsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [logs, setLogs] = useState<SystemLog[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
   const [severity, setSeverity] = useState('');
+  const [category, setCategory] = useState('');
   const [search, setSearch] = useState('');
   const [searchInput, setSearchInput] = useState('');
   const [userId, setUserId] = useState(searchParams.get('userId') || '');
+  const [fromDate, setFromDate] = useState('');
+  const [toDate, setToDate] = useState('');
   const [loading, setLoading] = useState(true);
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
+  const [severityCounts, setSeverityCounts] = useState<Record<string, number>>({});
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const autoRefreshRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string | number> = { page, perPage: PER_PAGE };
+      const params: Record<string, string | number> = { page, perPage };
       if (severity) params.severity = severity;
+      if (category) params.category = category;
       if (search) params.search = search;
       if (userId) params.userId = userId;
+      if (fromDate) params.fromDate = fromDate;
+      if (toDate) params.toDate = toDate;
       const data = await adminApi.listLogs(params);
       setLogs(data.logs);
       setTotal(data.total);
@@ -41,11 +68,38 @@ export default function LogsPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, severity, search, userId]);
+  }, [page, perPage, severity, category, search, userId, fromDate, toDate]);
+
+  const fetchSeverityCounts = useCallback(async () => {
+    try {
+      const params: Record<string, string> = {};
+      if (category) params.category = category;
+      if (fromDate) params.fromDate = fromDate;
+      if (toDate) params.toDate = toDate;
+      const data = await adminApi.logSeverityCounts(params);
+      setSeverityCounts(data.counts);
+    } catch {
+      // ignore
+    }
+  }, [category, fromDate, toDate]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+  useEffect(() => { fetchSeverityCounts(); }, [fetchSeverityCounts]);
 
-  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE));
+  // Auto-refresh
+  useEffect(() => {
+    if (autoRefresh) {
+      autoRefreshRef.current = setInterval(() => {
+        fetchLogs();
+        fetchSeverityCounts();
+      }, 10000);
+    }
+    return () => {
+      if (autoRefreshRef.current) clearInterval(autoRefreshRef.current);
+    };
+  }, [autoRefresh, fetchLogs, fetchSeverityCounts]);
+
+  const totalPages = Math.max(1, Math.ceil(total / perPage));
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,23 +112,121 @@ export default function LogsPage() {
     setSeverity(sev);
   };
 
+  const handleCategoryChange = (cat: string) => {
+    setPage(1);
+    setCategory(cat);
+  };
+
   const clearUserFilter = () => {
     setUserId('');
     setPage(1);
     setSearchParams({});
   };
 
+  const applyDatePreset = (hours: number) => {
+    const now = new Date();
+    const from = new Date(now.getTime() - hours * 60 * 60 * 1000);
+    setFromDate(from.toISOString());
+    setToDate('');
+    setPage(1);
+  };
+
+  const clearDateFilter = () => {
+    setFromDate('');
+    setToDate('');
+    setPage(1);
+  };
+
+  const handleExport = async () => {
+    try {
+      const params: Record<string, string> = {};
+      if (severity) params.severity = severity;
+      if (category) params.category = category;
+      if (search) params.search = search;
+      if (fromDate) params.fromDate = fromDate;
+      if (toDate) params.toDate = toDate;
+      const blob = await adminApi.exportLogsCSV(params);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'system_logs.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleRefresh = () => {
+    fetchLogs();
+    fetchSeverityCounts();
+  };
+
+  const totalCount = Object.values(severityCounts).reduce((a, b) => a + b, 0);
+
   return (
     <div>
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-white flex items-center gap-3">
             <FileText className="w-7 h-7 text-primary-400" />
             System Logs
           </h1>
-          <p className="text-dark-400 mt-1">{total} log entries</p>
+          <p className="text-dark-400 mt-1">{total.toLocaleString()} entries</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setAutoRefresh(a => !a)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors ${
+              autoRefresh
+                ? 'border-primary-500/50 bg-primary-500/10 text-primary-400'
+                : 'border-dark-700 bg-dark-800 text-dark-300 hover:text-white'
+            }`}
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${autoRefresh ? 'animate-spin' : ''}`} />
+            {autoRefresh ? 'Auto' : 'Auto'}
+          </button>
+          <button
+            onClick={handleRefresh}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white transition-colors"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            Refresh
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            CSV
+          </button>
         </div>
       </div>
+
+      {/* Severity summary bar */}
+      {totalCount > 0 && (
+        <div className="flex items-center gap-3 mb-4 flex-wrap">
+          {(['critical', 'high', 'medium', 'low', 'debug'] as LogSeverity[]).map(sev => {
+            const count = severityCounts[sev] || 0;
+            if (count === 0) return null;
+            const cfg = severityConfig[sev];
+            const isActive = severity === sev;
+            return (
+              <button
+                key={sev}
+                onClick={() => handleSeverityChange(isActive ? '' : sev)}
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors border ${
+                  isActive
+                    ? `${cfg.bg} ${cfg.color} border-current`
+                    : `${cfg.bg} ${cfg.color} border-transparent hover:border-current`
+                }`}
+              >
+                {cfg.label}: {count.toLocaleString()}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* Active user filter chip */}
       {userId && (
@@ -88,7 +240,30 @@ export default function LogsPage() {
         </div>
       )}
 
-      {/* Filters */}
+      {/* Date range */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <Calendar className="w-4 h-4 text-dark-500" />
+        {DATE_PRESETS.map(p => (
+          <button
+            key={p.hours}
+            onClick={() => applyDatePreset(p.hours)}
+            className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${
+              fromDate && !toDate && Math.abs(new Date().getTime() - new Date(fromDate).getTime() - p.hours * 3600000) < 60000
+                ? 'border-primary-500/50 bg-primary-500/10 text-primary-400'
+                : 'border-dark-700 bg-dark-800 text-dark-400 hover:text-white'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
+        {fromDate && (
+          <button onClick={clearDateFilter} className="px-2.5 py-1 text-xs text-dark-400 hover:text-white border border-dark-700 rounded-lg transition-colors">
+            Clear dates
+          </button>
+        )}
+      </div>
+
+      {/* Filters row */}
       <div className="flex flex-col sm:flex-row gap-3 mb-6">
         <form onSubmit={handleSearch} className="flex-1 flex gap-2">
           <div className="relative flex-1">
@@ -130,6 +305,17 @@ export default function LogsPage() {
           <option value="low">Low</option>
           <option value="debug">Debug</option>
         </select>
+
+        <select
+          value={category}
+          onChange={(e) => handleCategoryChange(e.target.value)}
+          className="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500"
+        >
+          <option value="">All categories</option>
+          {Object.entries(categoryLabels).map(([val, label]) => (
+            <option key={val} value={val}>{label}</option>
+          ))}
+        </select>
       </div>
 
       {loading ? (
@@ -145,41 +331,105 @@ export default function LogsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-dark-800">
+                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-10"></th>
                   <th className="text-left px-4 py-3 text-dark-400 font-medium w-44">Timestamp</th>
-                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-28">Severity</th>
-                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-24">User</th>
+                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-24">Severity</th>
+                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-24">Category</th>
+                  <th className="text-left px-4 py-3 text-dark-400 font-medium w-20">User</th>
                   <th className="text-left px-4 py-3 text-dark-400 font-medium">Message</th>
                 </tr>
               </thead>
               <tbody>
                 {logs.map((log) => {
                   const sev = severityConfig[log.severity] || severityConfig.debug;
+                  const isExpanded = expandedRow === log.id;
                   return (
-                    <tr key={log.id} className="border-b border-dark-800/50 hover:bg-dark-800/30">
-                      <td className="px-4 py-3 text-dark-400 whitespace-nowrap font-mono text-xs">
-                        {new Date(log.createdAt).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${sev.color} ${sev.bg}`}>
-                          {sev.label}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        {log.userId ? (
-                          <Link
-                            to={`/last/users/${log.userId}`}
-                            className="text-primary-400 hover:text-primary-300 text-xs font-mono transition-colors"
-                          >
-                            {log.userId.slice(-8)}
-                          </Link>
-                        ) : (
-                          <span className="text-dark-500 text-xs">System</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-dark-200 break-all">
-                        {log.message}
-                      </td>
-                    </tr>
+                    <>
+                      <tr
+                        key={log.id}
+                        className="border-b border-dark-800/50 hover:bg-dark-800/30 cursor-pointer"
+                        onClick={() => setExpandedRow(isExpanded ? null : log.id)}
+                      >
+                        <td className="px-4 py-3 text-dark-500">
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </td>
+                        <td className="px-4 py-3 text-dark-400 whitespace-nowrap font-mono text-xs">
+                          {new Date(log.createdAt).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${sev.color} ${sev.bg}`}>
+                            {sev.label}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {log.category ? (
+                            <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-dark-700/50 text-dark-300">
+                              {categoryLabels[log.category] || log.category}
+                            </span>
+                          ) : (
+                            <span className="text-dark-600 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {log.userId ? (
+                            <Link
+                              to={`/last/users/${log.userId}`}
+                              className="text-primary-400 hover:text-primary-300 text-xs font-mono transition-colors"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {log.userId.slice(-8)}
+                            </Link>
+                          ) : (
+                            <span className="text-dark-500 text-xs">System</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-dark-200 truncate max-w-md">
+                          {log.message}
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr key={`${log.id}-detail`} className="border-b border-dark-800/50 bg-dark-800/20">
+                          <td colSpan={6} className="px-8 py-4">
+                            <div className="space-y-2 text-sm">
+                              <div>
+                                <span className="text-dark-400">Full message: </span>
+                                <span className="text-dark-200 break-all">{log.message}</span>
+                              </div>
+                              {log.action && (
+                                <div>
+                                  <span className="text-dark-400">Action: </span>
+                                  <span className="text-dark-200 font-mono">{log.action}</span>
+                                </div>
+                              )}
+                              {log.tenantId && (
+                                <div>
+                                  <span className="text-dark-400">Tenant: </span>
+                                  <Link to={`/last/tenants/${log.tenantId}`} className="text-primary-400 hover:text-primary-300 font-mono text-xs">
+                                    {log.tenantId}
+                                  </Link>
+                                </div>
+                              )}
+                              {log.userId && (
+                                <div>
+                                  <span className="text-dark-400">User: </span>
+                                  <Link to={`/last/users/${log.userId}`} className="text-primary-400 hover:text-primary-300 font-mono text-xs">
+                                    {log.userId}
+                                  </Link>
+                                </div>
+                              )}
+                              {log.metadata && Object.keys(log.metadata).length > 0 && (
+                                <div>
+                                  <span className="text-dark-400">Metadata: </span>
+                                  <pre className="mt-1 p-2 bg-dark-900 rounded text-xs text-dark-300 overflow-x-auto">
+                                    {JSON.stringify(log.metadata, null, 2)}
+                                  </pre>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>
@@ -187,29 +437,41 @@ export default function LogsPage() {
           </div>
 
           {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex items-center justify-between mt-4">
+          <div className="flex items-center justify-between mt-4">
+            <div className="flex items-center gap-3">
               <p className="text-sm text-dark-400">
-                Page {page} of {totalPages}
+                Showing {((page - 1) * perPage) + 1}–{Math.min(page * perPage, total)} of {total.toLocaleString()}
               </p>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white disabled:opacity-40 disabled:hover:text-dark-300 transition-colors"
-                >
-                  <ChevronLeft className="w-4 h-4" /> Prev
-                </button>
-                <button
-                  onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-                  disabled={page === totalPages}
-                  className="flex items-center gap-1 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white disabled:opacity-40 disabled:hover:text-dark-300 transition-colors"
-                >
-                  Next <ChevronRight className="w-4 h-4" />
-                </button>
-              </div>
+              <select
+                value={perPage}
+                onChange={(e) => { setPerPage(Number(e.target.value)); setPage(1); }}
+                className="px-2 py-1 bg-dark-800 border border-dark-700 rounded text-xs text-dark-300 focus:outline-none"
+              >
+                {PER_PAGE_OPTIONS.map(n => (
+                  <option key={n} value={n}>{n} / page</option>
+                ))}
+              </select>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="flex items-center gap-1 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white disabled:opacity-40 disabled:hover:text-dark-300 transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" /> Prev
+              </button>
+              <span className="text-sm text-dark-400">
+                {page} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages}
+                className="flex items-center gap-1 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white disabled:opacity-40 disabled:hover:text-dark-300 transition-colors"
+              >
+                Next <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
         </>
       )}
     </div>

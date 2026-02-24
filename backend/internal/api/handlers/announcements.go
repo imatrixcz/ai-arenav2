@@ -49,7 +49,7 @@ func (h *AnnouncementsHandler) ListPublic(w http.ResponseWriter, r *http.Request
 
 // ListAll returns all announcements (admin only).
 func (h *AnnouncementsHandler) ListAll(w http.ResponseWriter, r *http.Request) {
-	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
+	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(200)
 	cursor, err := h.db.Announcements().Find(r.Context(), bson.M{}, opts)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to list announcements")

@@ -100,7 +100,8 @@ func main() {
 	if err := cfgStore.Load(context.Background()); err != nil {
 		log.Fatalf("Failed to load config store: %v", err)
 	}
-	log.Println("Configuration store loaded")
+	cfgStore.StartAutoReload(context.Background(), 60*time.Second)
+	log.Println("Configuration store loaded (auto-reload every 60s)")
 
 	// Seed plans
 	if err := planstore.Seed(context.Background(), database); err != nil {
@@ -472,7 +473,11 @@ func main() {
 	usageAPI := guarded.PathPrefix("/usage").Subrouter()
 	usageAPI.Use(authMiddleware.RequireAuth)
 	usageAPI.Use(tenantMiddleware.RequireTenant)
-	usageAPI.HandleFunc("/record", usageHandler.RecordUsage).Methods("POST")
+	usageAPI.HandleFunc("/record", rateLimiter.RateLimitHandler(
+		middleware.UsageRecordLimit,
+		func(r *http.Request) string { return "usage:" + middleware.GetClientIP(r) },
+		usageHandler.RecordUsage,
+	)).Methods("POST")
 	usageAPI.HandleFunc("/summary", usageHandler.GetSummary).Methods("GET")
 
 	// Webhook route (no auth — uses Stripe signature verification)
@@ -500,6 +505,8 @@ func main() {
 	adminAPI.HandleFunc("/about", adminHandler.GetAbout).Methods("GET")
 	adminAPI.HandleFunc("/dashboard", adminHandler.GetDashboard).Methods("GET")
 	adminAPI.HandleFunc("/logs", logHandler.ListLogs).Methods("GET")
+	adminAPI.HandleFunc("/logs/severity-counts", logHandler.SeverityCounts).Methods("GET")
+	adminAPI.HandleFunc("/logs/export", logHandler.ExportCSV).Methods("GET")
 	adminAPI.HandleFunc("/config", configHandler.ListConfig).Methods("GET")
 	adminAPI.HandleFunc("/config", configHandler.CreateConfig).Methods("POST")
 	adminAPI.HandleFunc("/config/{name}", configHandler.GetConfig).Methods("GET")

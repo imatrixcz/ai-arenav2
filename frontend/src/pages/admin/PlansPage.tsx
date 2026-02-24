@@ -511,13 +511,35 @@ function PlanFormModal({ plan, subscriberCount, onClose, onSaved }: PlanFormModa
       return;
     }
 
+    const discount = parseInt(annualDiscountPct) || 0;
+    if (discount < 0 || discount > 100) {
+      setError('Annual discount must be between 0 and 100');
+      setSaving(false);
+      return;
+    }
+
+    const trial = parseInt(trialDays) || 0;
+    if (trial < 0) {
+      setError('Trial days cannot be negative');
+      setSaving(false);
+      return;
+    }
+
+    const parsedMinSeats = parseInt(minSeats) || 1;
+    const parsedMaxSeats = parseInt(maxSeats) || 0;
+    if (pricingModel === 'per_seat' && parsedMaxSeats > 0 && parsedMaxSeats < parsedMinSeats) {
+      setError('Max seats cannot be less than min seats');
+      setSaving(false);
+      return;
+    }
+
     const perSeatPriceCents = Math.round(parseFloat(perSeatPriceDollars || '0') * 100);
 
     const payload = {
       name: name.trim(),
       description: description.trim(),
       monthlyPriceCents: priceCents,
-      annualDiscountPct: parseInt(annualDiscountPct) || 0,
+      annualDiscountPct: discount,
       usageCreditsPerMonth: parseInt(usageCreditsPerMonth) || 0,
       creditResetPolicy,
       bonusCredits: parseInt(bonusCredits) || 0,
@@ -525,9 +547,9 @@ function PlanFormModal({ plan, subscriberCount, onClose, onSaved }: PlanFormModa
       pricingModel,
       perSeatPriceCents,
       includedSeats: parseInt(includedSeats) || 0,
-      minSeats: parseInt(minSeats) || 1,
-      maxSeats: parseInt(maxSeats) || 0,
-      trialDays: parseInt(trialDays) || 0,
+      minSeats: parsedMinSeats,
+      maxSeats: parsedMaxSeats,
+      trialDays: trial,
       entitlements,
     };
 
@@ -963,12 +985,19 @@ function BundleFormModal({ bundle, onClose, onSaved }: BundleFormModalProps) {
       return;
     }
 
+    const sortOrderNum = parseInt(sortOrder) || 0;
+    if (sortOrderNum < 0) {
+      setError('Sort order cannot be negative');
+      setSaving(false);
+      return;
+    }
+
     const payload = {
       name: name.trim(),
       credits: creditsNum,
       priceCents,
       isActive,
-      sortOrder: parseInt(sortOrder) || 0,
+      sortOrder: sortOrderNum,
     };
 
     try {

@@ -55,14 +55,14 @@ export default function InvoiceModal({ tx, tenantName, onClose }: InvoiceModalPr
           <div className="flex justify-between">
             <span className="text-dark-300 text-sm">{tx.description}</span>
             <span className="text-white text-sm font-medium">
-              ${((tx.taxAmountCents > 0 ? tx.subtotalCents : tx.amountCents) / 100).toFixed(2)}
+              ${((tx.taxAmountCents > 0 ? (tx.subtotalCents || tx.amountCents) : tx.amountCents) / 100).toFixed(2)}
             </span>
           </div>
           {tx.taxAmountCents > 0 && (
             <>
               <div className="flex justify-between">
                 <span className="text-dark-400 text-sm">Subtotal</span>
-                <span className="text-dark-300 text-sm">${(tx.subtotalCents / 100).toFixed(2)}</span>
+                <span className="text-dark-300 text-sm">${((tx.subtotalCents || tx.amountCents) / 100).toFixed(2)}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-dark-400 text-sm">Tax</span>
