@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Tag, Plus, X, Ban, Calendar, Filter } from 'lucide-react';
+import { Tag, Plus, X, Ban, Calendar, Filter, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
@@ -7,11 +7,26 @@ import type { Promotion, EligibleProduct } from '../../types';
 import TableSkeleton from '../../components/TableSkeleton';
 import ConfirmModal from '../../components/ConfirmModal';
 
+/** Deduplicate product names from Stripe Product IDs (plans have 2 products: monthly + annual). */
+function uniqueProductNames(productIds: string[], nameMap: Record<string, string>): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const pid of productIds) {
+    const name = nameMap[pid] || pid.slice(0, 12) + '...';
+    if (!seen.has(name)) {
+      seen.add(name);
+      result.push(name);
+    }
+  }
+  return result;
+}
+
 export default function PromotionsPage() {
   const [promotions, setPromotions] = useState<Promotion[]>([]);
   const [productNames, setProductNames] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [showCreate, setShowCreate] = useState(false);
+  const [editTarget, setEditTarget] = useState<Promotion | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<Promotion | null>(null);
   const [deactivating, setDeactivating] = useState(false);
 
@@ -99,7 +114,11 @@ export default function PromotionsPage() {
                 </thead>
                 <tbody className="divide-y divide-dark-800/50">
                   {promotions.map(promo => (
-                    <tr key={promo.id} className="hover:bg-dark-800/20">
+                    <tr
+                      key={promo.id}
+                      className="hover:bg-dark-800/20 cursor-pointer"
+                      onClick={() => setEditTarget(promo)}
+                    >
                       <td className="px-6 py-3 text-sm text-white font-mono font-medium">{promo.code}</td>
                       <td className="px-6 py-3 text-sm text-dark-300">
                         {promo.percentOff > 0
@@ -119,9 +138,9 @@ export default function PromotionsPage() {
                       <td className="px-6 py-3 text-sm">
                         {promo.appliesToProducts && promo.appliesToProducts.length > 0 ? (
                           <div className="flex flex-wrap gap-1">
-                            {promo.appliesToProducts.map(pid => (
-                              <span key={pid} className="px-1.5 py-0.5 text-xs bg-dark-700 text-dark-300 rounded">
-                                {productNames[pid] || pid.slice(0, 12) + '...'}
+                            {uniqueProductNames(promo.appliesToProducts, productNames).map(name => (
+                              <span key={name} className="px-1.5 py-0.5 text-xs bg-dark-700 text-dark-300 rounded">
+                                {name}
                               </span>
                             ))}
                           </div>
@@ -139,15 +158,24 @@ export default function PromotionsPage() {
                         )}
                       </td>
                       <td className="px-6 py-3 text-right">
-                        {promo.active && (
+                        <div className="flex items-center justify-end gap-1">
                           <button
-                            onClick={() => setDeactivateTarget(promo)}
-                            className="p-1.5 text-dark-400 hover:text-red-400 transition-colors"
-                            aria-label="Deactivate promotion"
+                            onClick={e => { e.stopPropagation(); setEditTarget(promo); }}
+                            className="p-1.5 text-dark-400 hover:text-primary-400 transition-colors"
+                            aria-label="Edit promotion"
                           >
-                            <Ban className="w-4 h-4" />
+                            <Pencil className="w-4 h-4" />
                           </button>
-                        )}
+                          {promo.active && (
+                            <button
+                              onClick={e => { e.stopPropagation(); setDeactivateTarget(promo); }}
+                              className="p-1.5 text-dark-400 hover:text-red-400 transition-colors"
+                              aria-label="Deactivate promotion"
+                            >
+                              <Ban className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -165,6 +193,15 @@ export default function PromotionsPage() {
         />
       )}
 
+      {editTarget && (
+        <EditPromotionModal
+          promo={editTarget}
+          productNames={productNames}
+          onClose={() => setEditTarget(null)}
+          onUpdated={() => { setEditTarget(null); fetchPromotions(); }}
+        />
+      )}
+
       <ConfirmModal
         open={deactivateTarget !== null}
         onClose={() => setDeactivateTarget(null)}
@@ -175,6 +212,165 @@ export default function PromotionsPage() {
         confirmVariant="danger"
         loading={deactivating}
       />
+    </div>
+  );
+}
+
+function EditPromotionModal({ promo, productNames, onClose, onUpdated }: {
+  promo: Promotion;
+  productNames: Record<string, string>;
+  onClose: () => void;
+  onUpdated: () => void;
+}) {
+  const [couponName, setCouponName] = useState(promo.couponName || '');
+  const [active, setActive] = useState(promo.active);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const hasChanges = couponName !== (promo.couponName || '') || active !== promo.active;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      await adminApi.updatePromotion({
+        id: promo.id,
+        couponId: promo.couponId,
+        couponName: couponName !== (promo.couponName || '') ? couponName : undefined,
+        active: active !== promo.active ? active : undefined,
+      });
+      toast.success(`${promo.code} updated`);
+      onUpdated();
+    } catch (err: any) {
+      setError(err.response?.data?.error || getErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const discount = promo.percentOff > 0
+    ? `${promo.percentOff}% off`
+    : `${(promo.amountOff / 100).toFixed(2)} ${(promo.currency || 'usd').toUpperCase()} off`;
+
+  const appliesTo = promo.appliesToProducts && promo.appliesToProducts.length > 0
+    ? uniqueProductNames(promo.appliesToProducts, productNames)
+    : null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative bg-dark-900 rounded-2xl border border-dark-700 p-6 w-full max-w-lg" role="dialog" aria-modal="true">
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-lg font-semibold text-white">Edit Promotion</h3>
+          <button onClick={onClose} className="p-2 text-dark-400 hover:text-white transition-colors" aria-label="Close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          {/* Read-only info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-dark-500 mb-1">Code</label>
+              <p className="text-white font-mono text-sm">{promo.code}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-dark-500 mb-1">Discount</label>
+              <p className="text-white text-sm">{discount}</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-dark-500 mb-1">Redemptions</label>
+              <p className="text-white text-sm font-mono">
+                {promo.timesRedeemed}
+                {promo.maxRedemptions > 0 && ` / ${promo.maxRedemptions}`}
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-dark-500 mb-1">Expiration</label>
+              <p className="text-sm">
+                {promo.expiresAt
+                  ? (() => {
+                      const d = new Date(promo.expiresAt * 1000);
+                      const isExpired = d < new Date();
+                      return <span className={isExpired ? 'text-red-400' : 'text-white'}>{d.toLocaleDateString()}</span>;
+                    })()
+                  : <span className="text-dark-500">Never</span>
+                }
+              </p>
+            </div>
+          </div>
+
+          {/* Applies to */}
+          <div>
+            <label className="block text-xs font-medium text-dark-500 mb-1">Applies To</label>
+            {appliesTo ? (
+              <div className="flex flex-wrap gap-1">
+                {appliesTo.map(name => (
+                  <span key={name} className="px-2 py-0.5 text-xs bg-dark-700 text-dark-300 rounded">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-dark-400 text-sm">All products</p>
+            )}
+          </div>
+
+          <div className="border-t border-dark-800 pt-4 space-y-4">
+            <p className="text-xs text-dark-500">Editable fields below. Code, discount, redemption limit, expiration, and product restrictions cannot be changed after creation.</p>
+
+            {/* Editable: coupon name */}
+            <div>
+              <label className="block text-sm font-medium text-dark-300 mb-1">Coupon Name</label>
+              <input
+                value={couponName}
+                onChange={e => setCouponName(e.target.value)}
+                className="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-white text-sm focus:border-primary-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Editable: active status */}
+            <div>
+              <label className="block text-sm font-medium text-dark-300 mb-1">Status</label>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setActive(true)}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    active ? 'bg-accent-emerald/20 border-accent-emerald/50 text-accent-emerald' : 'bg-dark-800 border-dark-700 text-dark-400'
+                  }`}
+                >
+                  Active
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActive(false)}
+                  className={`flex-1 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+                    !active ? 'bg-red-500/20 border-red-500/50 text-red-400' : 'bg-dark-800 border-dark-700 text-dark-400'
+                  }`}
+                >
+                  Inactive
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {error && <p className="text-sm text-red-400 mt-3">{error}</p>}
+
+        <div className="flex justify-end gap-3 mt-6">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-dark-400 hover:text-white transition-colors">
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving || !hasChanges}
+            className="px-4 py-2 bg-primary-500 text-white text-sm font-medium rounded-lg hover:bg-primary-600 disabled:opacity-50 transition-colors"
+          >
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

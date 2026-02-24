@@ -555,6 +555,7 @@ func main() {
 	adminOwner.HandleFunc("/credit-bundles/{bundleId}", bundlesHandler.UpdateBundle).Methods("PUT")
 	adminOwner.HandleFunc("/credit-bundles/{bundleId}", bundlesHandler.DeleteBundle).Methods("DELETE")
 	adminOwner.HandleFunc("/promotions", promotionsHandler.CreatePromotion).Methods("POST")
+	adminOwner.HandleFunc("/promotions/update", promotionsHandler.UpdatePromotion).Methods("POST")
 	adminOwner.HandleFunc("/promotions/deactivate", promotionsHandler.DeactivatePromotion).Methods("POST")
 	adminOwner.HandleFunc("/announcements", announcementsHandler.Create).Methods("POST")
 	adminOwner.HandleFunc("/announcements/{id}", announcementsHandler.Update).Methods("PUT")

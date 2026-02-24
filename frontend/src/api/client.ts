@@ -259,6 +259,8 @@ export const adminApi = {
     api.get<{ items: EligibleProduct[] }>('/admin/promotions/eligible-products').then(r => r.data),
   createPromotion: (data: { code: string; name?: string; percentOff?: number; amountOff?: number; currency?: string; maxRedemptions?: number; expiresAt?: string; appliesTo?: { type: string; id: string }[] }) =>
     api.post<{ id: string; code: string }>('/admin/promotions', data).then(r => r.data),
+  updatePromotion: (data: { id: string; couponId: string; couponName?: string; active?: boolean }) =>
+    api.post('/admin/promotions/update', data).then(r => r.data),
   deactivatePromotion: (id: string) =>
     api.post('/admin/promotions/deactivate', { id }).then(r => r.data),
 

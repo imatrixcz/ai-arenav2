@@ -440,6 +440,53 @@ func (h *PromotionsHandler) resolveStripeProducts(ctx context.Context, itemType 
 	return productIDs, nil
 }
 
+// UpdatePromotion updates an existing promotion code and/or its coupon.
+// Stripe allows updating: promotion code active status, coupon name.
+func (h *PromotionsHandler) UpdatePromotion(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID         string  `json:"id"`         // Promotion code ID
+		CouponID   string  `json:"couponId"`   // Coupon ID
+		CouponName *string `json:"couponName"` // Coupon display name (nil = no change)
+		Active     *bool   `json:"active"`     // Promotion code active status (nil = no change)
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+	if req.ID == "" {
+		respondWithError(w, http.StatusBadRequest, "Promotion code ID is required")
+		return
+	}
+
+	// Update coupon name if provided.
+	if req.CouponName != nil && req.CouponID != "" {
+		_, err := coupon.Update(req.CouponID, &stripe.CouponParams{
+			Name: stripe.String(*req.CouponName),
+		})
+		apicounter.StripeAPICalls.Add(1)
+		if err != nil {
+			log.Printf("Promotions: coupon update error: %v", err)
+			respondWithError(w, http.StatusInternalServerError, "Failed to update coupon name")
+			return
+		}
+	}
+
+	// Update promotion code active status if provided.
+	if req.Active != nil {
+		_, err := promotioncode.Update(req.ID, &stripe.PromotionCodeParams{
+			Active: stripe.Bool(*req.Active),
+		})
+		apicounter.StripeAPICalls.Add(1)
+		if err != nil {
+			log.Printf("Promotions: promo code update error: %v", err)
+			respondWithError(w, http.StatusInternalServerError, "Failed to update promotion code")
+			return
+		}
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
 // DeactivatePromotion deactivates a Stripe promotion code.
 func (h *PromotionsHandler) DeactivatePromotion(w http.ResponseWriter, r *http.Request) {
 	var req struct {
