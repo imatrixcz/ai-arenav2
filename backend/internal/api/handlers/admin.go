@@ -1,9 +1,11 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"lastsaas/internal/auth"
 	"lastsaas/internal/db"
+	"lastsaas/internal/email"
 	"lastsaas/internal/events"
 	"lastsaas/internal/health"
 	"lastsaas/internal/middleware"
@@ -26,12 +29,13 @@ import (
 )
 
 type AdminHandler struct {
-	db         *db.MongoDB
-	events     events.Emitter
-	syslog     *syslog.Logger
-	health     *health.Service
-	getConfig  func(string) string
-	jwtService *auth.JWTService
+	db           *db.MongoDB
+	events       events.Emitter
+	syslog       *syslog.Logger
+	health       *health.Service
+	getConfig    func(string) string
+	jwtService   *auth.JWTService
+	emailService *email.ResendService
 }
 
 func NewAdminHandler(database *db.MongoDB, emitter events.Emitter, sysLogger *syslog.Logger) *AdminHandler {
@@ -49,6 +53,10 @@ func (h *AdminHandler) SetHealthService(svc *health.Service, getConfig func(stri
 
 func (h *AdminHandler) SetJWTService(svc *auth.JWTService) {
 	h.jwtService = svc
+}
+
+func (h *AdminHandler) SetEmailService(svc *email.ResendService) {
+	h.emailService = svc
 }
 
 var regexMetaChars = strings.NewReplacer(
@@ -1451,4 +1459,387 @@ func (h *AdminHandler) ImpersonateUser(w http.ResponseWriter, r *http.Request) {
 		"user":        targetUser,
 		"memberships": membershipInfos,
 	})
+}
+
+// ===== Root Member Management =====
+
+func (h *AdminHandler) getRootTenant(ctx context.Context) (*models.Tenant, error) {
+	var tenant models.Tenant
+	if err := h.db.Tenants().FindOne(ctx, bson.M{"isRoot": true}).Decode(&tenant); err != nil {
+		return nil, err
+	}
+	return &tenant, nil
+}
+
+// ListRootMembers handles GET /api/admin/members
+func (h *AdminHandler) ListRootMembers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rootTenant, err := h.getRootTenant(ctx)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Root tenant not found")
+		return
+	}
+
+	// Fetch memberships
+	cursor, err := h.db.TenantMemberships().Find(ctx, bson.M{"tenantId": rootTenant.ID})
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to fetch members")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var memberships []models.TenantMembership
+	if err := cursor.All(ctx, &memberships); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to decode members")
+		return
+	}
+
+	// Batch-fetch users
+	userIDs := make([]primitive.ObjectID, len(memberships))
+	for i, m := range memberships {
+		userIDs[i] = m.UserID
+	}
+	userMap := map[primitive.ObjectID]models.User{}
+	if len(userIDs) > 0 {
+		userCursor, err := h.db.Users().Find(ctx, bson.M{"_id": bson.M{"$in": userIDs}})
+		if err == nil {
+			defer userCursor.Close(ctx)
+			var users []models.User
+			if userCursor.All(ctx, &users) == nil {
+				for _, u := range users {
+					userMap[u.ID] = u
+				}
+			}
+		}
+	}
+
+	var members []MemberResponse
+	for _, m := range memberships {
+		user, ok := userMap[m.UserID]
+		if !ok {
+			continue
+		}
+		members = append(members, MemberResponse{
+			UserID:      user.ID.Hex(),
+			Email:       user.Email,
+			DisplayName: user.DisplayName,
+			Role:        m.Role,
+			JoinedAt:    m.JoinedAt,
+		})
+	}
+	if members == nil {
+		members = []MemberResponse{}
+	}
+
+	// Fetch pending invitations
+	invCursor, err := h.db.Invitations().Find(ctx, bson.M{
+		"tenantId":  rootTenant.ID,
+		"status":    models.InvitationPending,
+		"expiresAt": bson.M{"$gt": time.Now()},
+	}, options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}))
+
+	var invitations []models.Invitation
+	if err == nil {
+		defer invCursor.Close(ctx)
+		invCursor.All(ctx, &invitations)
+	}
+	if invitations == nil {
+		invitations = []models.Invitation{}
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"members":     members,
+		"invitations": invitations,
+	})
+}
+
+// InviteRootMember handles POST /api/admin/members/invite
+func (h *AdminHandler) InviteRootMember(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rootTenant, err := h.getRootTenant(ctx)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Root tenant not found")
+		return
+	}
+
+	membership, ok := middleware.GetMembershipFromContext(ctx)
+	if !ok {
+		respondWithError(w, http.StatusForbidden, "Membership context missing")
+		return
+	}
+	user, ok := middleware.GetUserFromContext(ctx)
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+
+	var req InviteMemberRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
+	if req.Email == "" {
+		respondWithError(w, http.StatusBadRequest, "Email is required")
+		return
+	}
+	if req.Role == models.RoleOwner {
+		respondWithError(w, http.StatusBadRequest, "Cannot invite as owner. Use transfer ownership instead.")
+		return
+	}
+	if !models.ValidRole(req.Role) {
+		respondWithError(w, http.StatusBadRequest, "Invalid role")
+		return
+	}
+	if req.Role == models.RoleAdmin && membership.Role != models.RoleOwner {
+		respondWithError(w, http.StatusForbidden, "Only owners can invite admins")
+		return
+	}
+
+	// Check if already a member
+	var existingUser models.User
+	if h.db.Users().FindOne(ctx, bson.M{"email": req.Email}).Decode(&existingUser) == nil {
+		count, _ := h.db.TenantMemberships().CountDocuments(ctx, bson.M{
+			"userId":   existingUser.ID,
+			"tenantId": rootTenant.ID,
+		})
+		if count > 0 {
+			respondWithError(w, http.StatusConflict, "User is already a member of the root tenant")
+			return
+		}
+	}
+
+	// Check if invitation already pending
+	count, _ := h.db.Invitations().CountDocuments(ctx, bson.M{
+		"tenantId":  rootTenant.ID,
+		"email":     req.Email,
+		"status":    models.InvitationPending,
+		"expiresAt": bson.M{"$gt": time.Now()},
+	})
+	if count > 0 {
+		respondWithError(w, http.StatusConflict, "An invitation has already been sent to this email")
+		return
+	}
+
+	// No plan seat limit checks for root tenant
+
+	now := time.Now()
+	token := generateRandomToken()
+	invitation := models.Invitation{
+		ID:        primitive.NewObjectID(),
+		TenantID:  rootTenant.ID,
+		Email:     req.Email,
+		Role:      req.Role,
+		Token:     token,
+		Status:    models.InvitationPending,
+		InvitedBy: user.ID,
+		ExpiresAt: now.Add(7 * 24 * time.Hour),
+		CreatedAt: now,
+	}
+
+	if _, err := h.db.Invitations().InsertOne(ctx, invitation); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to create invitation")
+		return
+	}
+
+	go func() {
+		if h.emailService != nil {
+			if err := h.emailService.SendInvitationEmail(req.Email, user.DisplayName, rootTenant.Name, token); err != nil {
+				log.Printf("Failed to send root member invitation email to %s: %v", req.Email, err)
+			}
+		}
+	}()
+
+	h.events.Emit(events.Event{
+		Type:      events.EventMemberInvited,
+		Timestamp: now,
+		Data: map[string]interface{}{
+			"tenantId": rootTenant.ID.Hex(),
+			"email":    req.Email,
+			"role":     string(req.Role),
+		},
+	})
+
+	h.syslog.LogTenantActivity(ctx, models.LogHigh,
+		fmt.Sprintf("Root member invited: %s as %s", req.Email, req.Role),
+		user.ID, rootTenant.ID, "admin.root_member_invited",
+		map[string]interface{}{"email": req.Email, "role": string(req.Role)})
+
+	respondWithJSON(w, http.StatusCreated, map[string]string{"message": "Invitation sent"})
+}
+
+// RemoveRootMember handles DELETE /api/admin/members/{userId}
+func (h *AdminHandler) RemoveRootMember(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rootTenant, err := h.getRootTenant(ctx)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Root tenant not found")
+		return
+	}
+
+	currentMembership, ok := middleware.GetMembershipFromContext(ctx)
+	if !ok {
+		respondWithError(w, http.StatusForbidden, "Membership context missing")
+		return
+	}
+
+	targetUserID, err := primitive.ObjectIDFromHex(mux.Vars(r)["userId"])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	if targetUserID == currentMembership.UserID {
+		respondWithError(w, http.StatusBadRequest, "Cannot remove yourself")
+		return
+	}
+
+	var targetMembership models.TenantMembership
+	if err := h.db.TenantMemberships().FindOne(ctx, bson.M{
+		"userId":   targetUserID,
+		"tenantId": rootTenant.ID,
+	}).Decode(&targetMembership); err != nil {
+		respondWithError(w, http.StatusNotFound, "Member not found")
+		return
+	}
+
+	if targetMembership.Role == models.RoleOwner {
+		respondWithError(w, http.StatusForbidden, "Cannot remove the owner. Transfer ownership first.")
+		return
+	}
+
+	if currentMembership.Role == models.RoleAdmin && targetMembership.Role != models.RoleUser {
+		respondWithError(w, http.StatusForbidden, "Admins can only remove users")
+		return
+	}
+
+	if _, err := h.db.TenantMemberships().DeleteOne(ctx, bson.M{"_id": targetMembership.ID}); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to remove member")
+		return
+	}
+
+	h.syslog.LogTenantActivity(ctx, models.LogHigh,
+		fmt.Sprintf("Root member removed: user %s", targetUserID.Hex()),
+		currentMembership.UserID, rootTenant.ID, "admin.root_member_removed",
+		map[string]interface{}{"targetUserId": targetUserID.Hex()})
+
+	h.events.Emit(events.Event{
+		Type:      events.EventMemberRemoved,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tenantId": rootTenant.ID.Hex(),
+			"userId":   targetUserID.Hex(),
+		},
+	})
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Member removed"})
+}
+
+// ChangeRootMemberRole handles PATCH /api/admin/members/{userId}/role
+func (h *AdminHandler) ChangeRootMemberRole(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rootTenant, err := h.getRootTenant(ctx)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Root tenant not found")
+		return
+	}
+
+	currentMembership, ok := middleware.GetMembershipFromContext(ctx)
+	if !ok {
+		respondWithError(w, http.StatusForbidden, "Membership context missing")
+		return
+	}
+
+	if currentMembership.Role != models.RoleOwner {
+		respondWithError(w, http.StatusForbidden, "Only the owner can change roles")
+		return
+	}
+
+	targetUserID, err := primitive.ObjectIDFromHex(mux.Vars(r)["userId"])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid user ID")
+		return
+	}
+
+	if targetUserID == currentMembership.UserID {
+		respondWithError(w, http.StatusBadRequest, "Cannot change your own role")
+		return
+	}
+
+	var req ChangeRoleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if req.Role == models.RoleOwner {
+		respondWithError(w, http.StatusBadRequest, "Cannot set role to owner. Use transfer ownership instead.")
+		return
+	}
+	if !models.ValidRole(req.Role) {
+		respondWithError(w, http.StatusBadRequest, "Invalid role")
+		return
+	}
+
+	result, err := h.db.TenantMemberships().UpdateOne(ctx,
+		bson.M{"userId": targetUserID, "tenantId": rootTenant.ID},
+		bson.M{"$set": bson.M{"role": req.Role, "updatedAt": time.Now()}},
+	)
+	if err != nil || result.MatchedCount == 0 {
+		respondWithError(w, http.StatusNotFound, "Member not found")
+		return
+	}
+
+	h.events.Emit(events.Event{
+		Type:      events.EventMemberRoleChanged,
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tenantId": rootTenant.ID.Hex(),
+			"userId":   targetUserID.Hex(),
+			"newRole":  string(req.Role),
+		},
+	})
+
+	h.syslog.LogTenantActivity(ctx, models.LogHigh,
+		fmt.Sprintf("Root member role changed: user %s to %s", targetUserID.Hex(), req.Role),
+		currentMembership.UserID, rootTenant.ID, "admin.root_member_role_changed",
+		map[string]interface{}{"targetUserId": targetUserID.Hex(), "newRole": string(req.Role)})
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Role updated"})
+}
+
+// CancelRootInvitation handles DELETE /api/admin/members/invitations/{invitationId}
+func (h *AdminHandler) CancelRootInvitation(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	rootTenant, err := h.getRootTenant(ctx)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Root tenant not found")
+		return
+	}
+
+	invID, err := primitive.ObjectIDFromHex(mux.Vars(r)["invitationId"])
+	if err != nil {
+		respondWithError(w, http.StatusBadRequest, "Invalid invitation ID")
+		return
+	}
+
+	result, err := h.db.Invitations().DeleteOne(ctx, bson.M{
+		"_id":      invID,
+		"tenantId": rootTenant.ID,
+		"status":   models.InvitationPending,
+	})
+	if err != nil || result.DeletedCount == 0 {
+		respondWithError(w, http.StatusNotFound, "Invitation not found")
+		return
+	}
+
+	if user, ok := middleware.GetUserFromContext(ctx); ok {
+		h.syslog.LogTenantActivity(ctx, models.LogMedium,
+			fmt.Sprintf("Root member invitation canceled: %s", invID.Hex()),
+			user.ID, rootTenant.ID, "admin.root_invitation_canceled",
+			map[string]interface{}{"invitationId": invID.Hex()})
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Invitation canceled"})
 }

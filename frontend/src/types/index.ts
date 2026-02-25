@@ -580,6 +580,18 @@ export interface TenantSettings {
   slug: string;
 }
 
+// --- Invitations ---
+
+export interface Invitation {
+  id: string;
+  email: string;
+  role: 'admin' | 'user';
+  status: 'pending' | 'accepted';
+  invitedBy: string;
+  expiresAt: string;
+  createdAt: string;
+}
+
 // --- Impersonation ---
 
 export interface ImpersonationResponse {

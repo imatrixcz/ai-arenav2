@@ -262,6 +262,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(database, emitter, sysLogger)
 	adminHandler.SetHealthService(healthService, cfgStore.Get)
 	adminHandler.SetJWTService(jwtService)
+	adminHandler.SetEmailService(emailService)
 	messageHandler := handlers.NewMessageHandler(database)
 	logHandler := handlers.NewLogHandler(database)
 	configHandler := handlers.NewConfigHandler(database, cfgStore, sysLogger)
@@ -537,6 +538,12 @@ func main() {
 	adminAPI.HandleFunc("/api-keys", apiKeysHandler.ListAPIKeys).Methods("GET")
 	adminAPI.HandleFunc("/api-keys", apiKeysHandler.CreateAPIKey).Methods("POST")
 	adminAPI.HandleFunc("/api-keys/{keyId}", apiKeysHandler.DeleteAPIKey).Methods("DELETE")
+	// Root member management (admin+ access)
+	adminAPI.HandleFunc("/members", adminHandler.ListRootMembers).Methods("GET")
+	adminAPI.HandleFunc("/members/invite", adminHandler.InviteRootMember).Methods("POST")
+	adminAPI.HandleFunc("/members/invitations/{invitationId}", adminHandler.CancelRootInvitation).Methods("DELETE")
+	adminAPI.HandleFunc("/members/{userId}", adminHandler.RemoveRootMember).Methods("DELETE")
+
 	adminAPI.HandleFunc("/webhooks", webhooksHandler.ListWebhooks).Methods("GET")
 	adminAPI.HandleFunc("/webhooks/event-types", webhooksHandler.ListEventTypes).Methods("GET")
 	adminAPI.HandleFunc("/webhooks", webhooksHandler.CreateWebhook).Methods("POST")
@@ -549,6 +556,7 @@ func main() {
 	// Owner-only admin actions
 	adminOwner := adminAPI.PathPrefix("").Subrouter()
 	adminOwner.Use(middleware.RequireRole(models.RoleOwner))
+	adminOwner.HandleFunc("/members/{userId}/role", adminHandler.ChangeRootMemberRole).Methods("PATCH")
 	adminOwner.HandleFunc("/tenants/{tenantId}", adminHandler.UpdateTenant).Methods("PUT")
 	adminOwner.HandleFunc("/tenants/{tenantId}/status", adminHandler.UpdateTenantStatus).Methods("PATCH")
 	adminOwner.HandleFunc("/users", adminHandler.ListUsers).Methods("GET")

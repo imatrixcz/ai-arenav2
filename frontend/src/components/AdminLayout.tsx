@@ -17,6 +17,7 @@ import {
   Paintbrush,
   Tag,
   Megaphone,
+  UserPlus,
 } from 'lucide-react';
 import { useTenant } from '../contexts/TenantContext';
 import { messagesApi } from '../api/client';
@@ -45,6 +46,7 @@ export default function AdminLayout() {
     { path: '/last/messages', icon: Mail, label: 'Messages' },
     { path: '/last/users', icon: Users, label: 'Users' },
     { path: '/last/tenants', icon: Building2, label: 'Tenants' },
+    { path: '/last/members', icon: UserPlus, label: 'Root Members' },
     { path: '/last/plans', icon: CreditCard, label: 'Plans' },
     { path: '/last/financial', icon: DollarSign, label: 'Financial' },
     { path: '/last/promotions', icon: Tag, label: 'Promotions' },

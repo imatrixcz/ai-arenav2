@@ -155,6 +155,10 @@ func setupTestServer(t *testing.T) *testEnv {
 	adminAPI.HandleFunc("/webhooks/{webhookId}/regenerate-secret", webhooksHandler.RegenerateSecret).Methods("POST")
 	adminAPI.HandleFunc("/financial/transactions", billingHandler.AdminListTransactions).Methods("GET")
 	adminAPI.HandleFunc("/financial/metrics", billingHandler.AdminGetMetrics).Methods("GET")
+	adminAPI.HandleFunc("/members", adminHandler.ListRootMembers).Methods("GET")
+	adminAPI.HandleFunc("/members/invite", adminHandler.InviteRootMember).Methods("POST")
+	adminAPI.HandleFunc("/members/invitations/{invitationId}", adminHandler.CancelRootInvitation).Methods("DELETE")
+	adminAPI.HandleFunc("/members/{userId}", adminHandler.RemoveRootMember).Methods("DELETE")
 
 	// Owner-only admin actions
 	adminOwner := adminAPI.PathPrefix("").Subrouter()
@@ -171,6 +175,7 @@ func setupTestServer(t *testing.T) *testEnv {
 	adminOwner.HandleFunc("/plans/{planId}/archive", plansHandler.ArchivePlan).Methods("POST")
 	adminOwner.HandleFunc("/plans/{planId}/unarchive", plansHandler.UnarchivePlan).Methods("POST")
 	adminOwner.HandleFunc("/tenants/{tenantId}/plan", plansHandler.AssignPlan).Methods("PATCH")
+	adminOwner.HandleFunc("/members/{userId}/role", adminHandler.ChangeRootMemberRole).Methods("PATCH")
 
 	server := httptest.NewServer(router)
 

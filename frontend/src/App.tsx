@@ -54,6 +54,7 @@ const AdminAPIPage = lazy(() => import('./pages/admin/APIPage'));
 const AdminBrandingPage = lazy(() => import('./pages/admin/BrandingPage'));
 const AdminPromotionsPage = lazy(() => import('./pages/admin/PromotionsPage'));
 const AdminAnnouncementsPage = lazy(() => import('./pages/admin/AnnouncementsPage'));
+const AdminRootMembersPage = lazy(() => import('./pages/admin/RootMembersPage'));
 
 // Public pages
 import LandingPage from './pages/public/LandingPage';
@@ -170,6 +171,7 @@ export default function App() {
                         <Route path="users/:userId" element={<Suspense fallback={<LazyFallback />}><AdminUserProfilePage /></Suspense>} />
                         <Route path="tenants" element={<Suspense fallback={<LazyFallback />}><AdminTenantsPage /></Suspense>} />
                         <Route path="tenants/:tenantId" element={<Suspense fallback={<LazyFallback />}><AdminTenantProfilePage /></Suspense>} />
+                        <Route path="members" element={<Suspense fallback={<LazyFallback />}><AdminRootMembersPage /></Suspense>} />
                         <Route path="plans" element={<Suspense fallback={<LazyFallback />}><AdminPlansPage /></Suspense>} />
                         <Route path="financial" element={<Suspense fallback={<LazyFallback />}><AdminFinancialPage /></Suspense>} />
                         <Route path="promotions" element={<Suspense fallback={<LazyFallback />}><AdminPromotionsPage /></Suspense>} />

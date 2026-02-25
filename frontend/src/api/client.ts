@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AuthResponse, MFARequiredResponse, AuthProviders, ActiveSession, ActivityLogEntry, PasskeyCredential, ImpersonationResponse, TenantMember, TenantDetail, TenantListItem, UserListItem, Message, AboutInfo, SystemLog, ConfigVar, UserDetail, UserMembershipDetail, DeletePreflightResponse, Plan, EntitlementKeyInfo, PublicPlansResponse, CreditBundle, SystemNode, SystemMetric, FinancialTransaction, DailyMetricPoint, IntegrationCheck, APIKey, Webhook, WebhookDelivery, WebhookEventTypeInfo, BrandingConfig, MediaItem, CustomPage, Promotion, EligibleProduct, Announcement, UsageSummary } from '../types';
+import type { AuthResponse, MFARequiredResponse, AuthProviders, ActiveSession, ActivityLogEntry, PasskeyCredential, ImpersonationResponse, TenantMember, TenantDetail, TenantListItem, UserListItem, Message, AboutInfo, SystemLog, ConfigVar, UserDetail, UserMembershipDetail, DeletePreflightResponse, Plan, EntitlementKeyInfo, PublicPlansResponse, CreditBundle, SystemNode, SystemMetric, FinancialTransaction, DailyMetricPoint, IntegrationCheck, APIKey, Webhook, WebhookDelivery, WebhookEventTypeInfo, BrandingConfig, MediaItem, CustomPage, Promotion, EligibleProduct, Announcement, UsageSummary, Invitation } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -315,6 +315,18 @@ export const adminApi = {
   // Impersonation
   impersonateUser: (userId: string) =>
     api.post<ImpersonationResponse>(`/admin/users/${userId}/impersonate`).then(r => r.data),
+
+  // Root Members
+  listRootMembers: () =>
+    api.get<{ members: TenantMember[]; invitations: Invitation[] }>('/admin/members').then(r => r.data),
+  inviteRootMember: (email: string, role: string) =>
+    api.post('/admin/members/invite', { email, role }).then(r => r.data),
+  removeRootMember: (userId: string) =>
+    api.delete(`/admin/members/${userId}`).then(r => r.data),
+  changeRootMemberRole: (userId: string, role: string) =>
+    api.patch(`/admin/members/${userId}/role`, { role }).then(r => r.data),
+  cancelRootInvitation: (invitationId: string) =>
+    api.delete(`/admin/members/invitations/${invitationId}`).then(r => r.data),
 };
 
 // --- Plans (public, authenticated) ---
