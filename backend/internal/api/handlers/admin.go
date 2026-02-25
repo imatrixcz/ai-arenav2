@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -108,6 +109,24 @@ func (h *AdminHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 		filter["$or"] = []bson.M{
 			{"name": bson.M{"$regex": escaped.Pattern}},
 			{"slug": bson.M{"$regex": escaped.Pattern}},
+		}
+	}
+
+	// Status filter
+	if status := q.Get("status"); status != "" {
+		switch status {
+		case "active":
+			filter["isActive"] = true
+		case "disabled":
+			filter["isActive"] = false
+		}
+	}
+
+	// Billing status filter
+	if bs := q.Get("billingStatus"); bs != "" {
+		switch models.BillingStatus(bs) {
+		case models.BillingStatusNone, models.BillingStatusActive, models.BillingStatusPastDue, models.BillingStatusCanceled:
+			filter["billingStatus"] = bs
 		}
 	}
 
@@ -227,6 +246,125 @@ func (h *AdminHandler) ListTenants(w http.ResponseWriter, r *http.Request) {
 		"page":    page,
 		"limit":   limit,
 	})
+}
+
+// ExportTenantsCSV streams all tenants matching filters as a CSV download.
+func (h *AdminHandler) ExportTenantsCSV(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+
+	filter := bson.M{}
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		escaped := primitive.Regex{Pattern: "(?i)" + escapeRegex(search)}
+		filter["$or"] = []bson.M{
+			{"name": bson.M{"$regex": escaped.Pattern}},
+			{"slug": bson.M{"$regex": escaped.Pattern}},
+		}
+	}
+	if status := q.Get("status"); status != "" {
+		switch status {
+		case "active":
+			filter["isActive"] = true
+		case "disabled":
+			filter["isActive"] = false
+		}
+	}
+	if bs := q.Get("billingStatus"); bs != "" {
+		switch models.BillingStatus(bs) {
+		case models.BillingStatusNone, models.BillingStatusActive, models.BillingStatusPastDue, models.BillingStatusCanceled:
+			filter["billingStatus"] = bs
+		}
+	}
+
+	opts := options.Find().
+		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
+		SetLimit(10000)
+
+	cursor, err := h.db.Tenants().Find(ctx, filter, opts)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to query tenants")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var tenants []models.Tenant
+	if err := cursor.All(ctx, &tenants); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to decode tenants")
+		return
+	}
+
+	// Batch member counts
+	tenantIDs := make([]primitive.ObjectID, len(tenants))
+	for i, t := range tenants {
+		tenantIDs[i] = t.ID
+	}
+	memberCounts := map[string]int{}
+	if len(tenantIDs) > 0 {
+		pipeline := bson.A{
+			bson.M{"$match": bson.M{"tenantId": bson.M{"$in": tenantIDs}}},
+			bson.M{"$group": bson.M{"_id": "$tenantId", "count": bson.M{"$sum": 1}}},
+		}
+		aggCursor, err := h.db.TenantMemberships().Aggregate(ctx, pipeline)
+		if err == nil {
+			defer aggCursor.Close(ctx)
+			var results []struct {
+				ID    primitive.ObjectID `bson:"_id"`
+				Count int               `bson:"count"`
+			}
+			aggCursor.All(ctx, &results)
+			for _, r := range results {
+				memberCounts[r.ID.Hex()] = r.Count
+			}
+		}
+	}
+
+	// Batch plan names
+	planCursor, _ := h.db.Plans().Find(ctx, bson.M{}, options.Find().SetLimit(500))
+	planNames := map[string]string{}
+	var systemPlanName string
+	if planCursor != nil {
+		var plans []models.Plan
+		planCursor.All(ctx, &plans)
+		planCursor.Close(ctx)
+		for _, p := range plans {
+			planNames[p.ID.Hex()] = p.Name
+			if p.IsSystem {
+				systemPlanName = p.Name
+			}
+		}
+	}
+	if systemPlanName == "" {
+		systemPlanName = "Free"
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=tenants.csv")
+
+	writer := csv.NewWriter(w)
+	writer.Write([]string{"ID", "Name", "Slug", "IsRoot", "IsActive", "MemberCount", "PlanName", "BillingStatus", "Credits", "CreatedAt"})
+
+	for _, t := range tenants {
+		pName := systemPlanName
+		if t.PlanID != nil {
+			if n, ok := planNames[t.PlanID.Hex()]; ok {
+				pName = n
+			}
+		}
+		totalCredits := t.SubscriptionCredits + t.PurchasedCredits
+		writer.Write([]string{
+			t.ID.Hex(),
+			t.Name,
+			t.Slug,
+			strconv.FormatBool(t.IsRoot),
+			strconv.FormatBool(t.IsActive),
+			strconv.Itoa(memberCounts[t.ID.Hex()]),
+			pName,
+			string(t.BillingStatus),
+			strconv.FormatInt(totalCredits, 10),
+			t.CreatedAt.Format(time.RFC3339),
+		})
+	}
+	writer.Flush()
 }
 
 func (h *AdminHandler) GetTenant(w http.ResponseWriter, r *http.Request) {
@@ -366,6 +504,16 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Status filter
+	if status := q.Get("status"); status != "" {
+		switch status {
+		case "active":
+			filter["isActive"] = true
+		case "disabled":
+			filter["isActive"] = false
+		}
+	}
+
 	// Sort
 	sortField := "createdAt"
 	sortDir := -1
@@ -460,6 +608,95 @@ func (h *AdminHandler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		"page":  page,
 		"limit": limit,
 	})
+}
+
+// ExportUsersCSV streams all users matching filters as a CSV download.
+func (h *AdminHandler) ExportUsersCSV(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	q := r.URL.Query()
+
+	filter := bson.M{}
+	if search := strings.TrimSpace(q.Get("search")); search != "" {
+		escaped := escapeRegex(search)
+		filter["$or"] = []bson.M{
+			{"email": bson.M{"$regex": "(?i)" + escaped}},
+			{"displayName": bson.M{"$regex": "(?i)" + escaped}},
+		}
+	}
+	if status := q.Get("status"); status != "" {
+		switch status {
+		case "active":
+			filter["isActive"] = true
+		case "disabled":
+			filter["isActive"] = false
+		}
+	}
+
+	opts := options.Find().
+		SetSort(bson.D{{Key: "createdAt", Value: -1}}).
+		SetLimit(10000)
+
+	cursor, err := h.db.Users().Find(ctx, filter, opts)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to query users")
+		return
+	}
+	defer cursor.Close(ctx)
+
+	var users []models.User
+	if err := cursor.All(ctx, &users); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Failed to decode users")
+		return
+	}
+
+	// Batch tenant counts
+	userIDs := make([]primitive.ObjectID, len(users))
+	for i, u := range users {
+		userIDs[i] = u.ID
+	}
+	tenantCounts := map[string]int{}
+	if len(userIDs) > 0 {
+		pipeline := bson.A{
+			bson.M{"$match": bson.M{"userId": bson.M{"$in": userIDs}}},
+			bson.M{"$group": bson.M{"_id": "$userId", "count": bson.M{"$sum": 1}}},
+		}
+		aggCursor, err := h.db.TenantMemberships().Aggregate(ctx, pipeline)
+		if err == nil {
+			defer aggCursor.Close(ctx)
+			var results []struct {
+				ID    primitive.ObjectID `bson:"_id"`
+				Count int               `bson:"count"`
+			}
+			aggCursor.All(ctx, &results)
+			for _, r := range results {
+				tenantCounts[r.ID.Hex()] = r.Count
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=users.csv")
+
+	writer := csv.NewWriter(w)
+	writer.Write([]string{"ID", "Email", "DisplayName", "EmailVerified", "IsActive", "TenantCount", "CreatedAt", "LastLoginAt"})
+
+	for _, u := range users {
+		lastLogin := ""
+		if u.LastLoginAt != nil {
+			lastLogin = u.LastLoginAt.Format(time.RFC3339)
+		}
+		writer.Write([]string{
+			u.ID.Hex(),
+			u.Email,
+			u.DisplayName,
+			strconv.FormatBool(u.EmailVerified),
+			strconv.FormatBool(u.IsActive),
+			strconv.Itoa(tenantCounts[u.ID.Hex()]),
+			u.CreatedAt.Format(time.RFC3339),
+			lastLogin,
+		})
+	}
+	writer.Flush()
 }
 
 func (h *AdminHandler) UpdateUserStatus(w http.ResponseWriter, r *http.Request) {

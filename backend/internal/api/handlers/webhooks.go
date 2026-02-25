@@ -3,7 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -102,7 +104,6 @@ func (h *WebhooksHandler) GetWebhook(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respondWithJSON(w, http.StatusOK, map[string]interface{}{
 			"webhook":    hook,
-			"secret":     hook.Secret,
 			"deliveries": []models.WebhookDelivery{},
 		})
 		return
@@ -119,7 +120,6 @@ func (h *WebhooksHandler) GetWebhook(w http.ResponseWriter, r *http.Request) {
 
 	respondWithJSON(w, http.StatusOK, map[string]interface{}{
 		"webhook":    hook,
-		"secret":     hook.Secret,
 		"deliveries": deliveries,
 	})
 }
@@ -129,6 +129,50 @@ type webhookRequest struct {
 	Description string   `json:"description"`
 	URL         string   `json:"url"`
 	Events      []string `json:"events"`
+}
+
+func validateWebhookURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL format")
+	}
+
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL must have a hostname")
+	}
+
+	// Block localhost variants
+	if host == "localhost" || host == "0.0.0.0" || host == "[::1]" {
+		return fmt.Errorf("URL cannot point to localhost")
+	}
+
+	// Resolve and check IPs
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		// If DNS fails, check if host is already an IP
+		ip := net.ParseIP(host)
+		if ip == nil {
+			return fmt.Errorf("cannot resolve hostname")
+		}
+		ips = []string{host}
+	}
+
+	for _, ipStr := range ips {
+		ip := net.ParseIP(ipStr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("URL cannot point to a private or internal address")
+		}
+		// Block cloud metadata endpoints
+		if ip.Equal(net.ParseIP("169.254.169.254")) {
+			return fmt.Errorf("URL cannot point to a metadata endpoint")
+		}
+	}
+
+	return nil
 }
 
 func validateWebhookRequest(req *webhookRequest) error {
@@ -147,6 +191,9 @@ func validateWebhookRequest(req *webhookRequest) error {
 	}
 	if !strings.HasPrefix(req.URL, "https://") && !strings.HasPrefix(req.URL, "http://") {
 		return fmt.Errorf("URL must start with https:// or http://")
+	}
+	if err := validateWebhookURL(req.URL); err != nil {
+		return err
 	}
 	if len(req.Events) == 0 {
 		return fmt.Errorf("at least one event type is required")

@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Building2, Shield, Zap, Search, ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
+import { Building2, Shield, Zap, Search, ChevronLeft, ChevronRight, ArrowUpDown, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
@@ -20,14 +20,16 @@ export default function TenantsPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
   const [sort, setSort] = useState(searchParams.get('sort') || '-createdAt');
+  const [status, setStatus] = useState(searchParams.get('status') || '');
+  const [billingStatus, setBillingStatus] = useState(searchParams.get('billingStatus') || '');
   const [statusTarget, setStatusTarget] = useState<TenantListItem | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const fetchTenants = useCallback(async (p: number, q: string, s: string) => {
+  const fetchTenants = useCallback(async (p: number, q: string, s: string, st: string, bs: string) => {
     setLoading(true);
     try {
-      const data = await adminApi.listTenants({ page: p, limit: PAGE_SIZE, search: q || undefined, sort: s });
+      const data = await adminApi.listTenants({ page: p, limit: PAGE_SIZE, search: q || undefined, sort: s, status: st || undefined, billingStatus: bs || undefined });
       setTenants(data.tenants || []);
       setTotal(data.total);
     } catch (err) {
@@ -43,13 +45,15 @@ export default function TenantsPage() {
     if (page > 1) params.page = String(page);
     if (search) params.search = search;
     if (sort && sort !== '-createdAt') params.sort = sort;
+    if (status) params.status = status;
+    if (billingStatus) params.billingStatus = billingStatus;
     setSearchParams(params, { replace: true });
-  }, [page, search, sort, setSearchParams]);
+  }, [page, search, sort, status, billingStatus, setSearchParams]);
 
-  // Fetch on page/sort change
+  // Fetch on page/sort/filter change
   useEffect(() => {
-    fetchTenants(page, search, sort);
-  }, [page, sort, fetchTenants]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchTenants(page, search, sort, status, billingStatus);
+  }, [page, sort, status, billingStatus, fetchTenants]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced search
   const handleSearchChange = (value: string) => {
@@ -57,13 +61,37 @@ export default function TenantsPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setPage(1);
-      fetchTenants(1, value, sort);
+      fetchTenants(1, value, sort, status, billingStatus);
     }, 300);
   };
 
   const toggleSort = (field: string) => {
     setSort(prev => prev === field ? `-${field}` : prev === `-${field}` ? field : field);
     setPage(1);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatus(value);
+    setPage(1);
+  };
+
+  const handleBillingStatusChange = (value: string) => {
+    setBillingStatus(value);
+    setPage(1);
+  };
+
+  const handleExport = async () => {
+    try {
+      const blob = await adminApi.exportTenantsCSV({ search: search || undefined, status: status || undefined, billingStatus: billingStatus || undefined });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'tenants.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore
+    }
   };
 
   const toggleStatus = async (tenant: TenantListItem) => {
@@ -93,11 +121,19 @@ export default function TenantsPage() {
           </h1>
           <p className="text-dark-400 mt-1">{total.toLocaleString()} total tenants</p>
         </div>
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white transition-colors"
+          title="Download CSV"
+        >
+          <Download className="w-3.5 h-3.5" />
+          CSV
+        </button>
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
-        <div className="relative max-w-md">
+      {/* Search + Filters */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
           <input
             type="text"
@@ -107,6 +143,26 @@ export default function TenantsPage() {
             className="w-full pl-10 pr-4 py-2.5 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-colors text-sm"
           />
         </div>
+        <select
+          value={status}
+          onChange={(e) => handleStatusChange(e.target.value)}
+          className="px-3 py-2.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500"
+        >
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="disabled">Disabled</option>
+        </select>
+        <select
+          value={billingStatus}
+          onChange={(e) => handleBillingStatusChange(e.target.value)}
+          className="px-3 py-2.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500"
+        >
+          <option value="">All billing</option>
+          <option value="active">Active</option>
+          <option value="past_due">Past Due</option>
+          <option value="canceled">Canceled</option>
+          <option value="none">None</option>
+        </select>
       </div>
 
       {/* Table */}

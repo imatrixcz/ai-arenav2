@@ -418,14 +418,26 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check if refresh token is stored and not revoked
+	// Check if refresh token is stored
 	tokenHash := hashToken(req.RefreshToken)
 	var storedToken models.RefreshToken
 	err = h.db.RefreshTokens().FindOne(r.Context(), bson.M{
 		"tokenHash": tokenHash,
-		"isRevoked": false,
 	}).Decode(&storedToken)
 	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Refresh token not found")
+		return
+	}
+
+	// If token was already revoked, this is a replay attack — revoke the entire family
+	if storedToken.IsRevoked {
+		if storedToken.FamilyID != "" {
+			h.db.RefreshTokens().UpdateMany(r.Context(),
+				bson.M{"familyId": storedToken.FamilyID},
+				bson.M{"$set": bson.M{"isRevoked": true}},
+			)
+			log.Printf("Security: refresh token replay detected for user %s, family %s revoked", storedToken.UserID.Hex(), storedToken.FamilyID)
+		}
 		respondWithError(w, http.StatusUnauthorized, "Refresh token has been revoked")
 		return
 	}
@@ -458,7 +470,7 @@ func (h *AuthHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 		respondWithError(w, http.StatusInternalServerError, "Failed to generate token")
 		return
 	}
-	storeRefreshToken(r, h.db, user.ID, refreshToken, h.jwtService.GetRefreshTTL())
+	storeRefreshToken(r, h.db, user.ID, refreshToken, h.jwtService.GetRefreshTTL(), storedToken.FamilyID)
 
 	// Update lastActiveAt on the new stored token
 	newHash := hashToken(refreshToken)
@@ -1139,6 +1151,64 @@ func (h *AuthHandler) MagicLinkVerify(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// --- Auth Code Exchange (OAuth security) ---
+
+// createAuthCodeRedirect stores tokens in the DB behind a short-lived code and redirects with ?code=XXX
+func (h *AuthHandler) createAuthCodeRedirect(w http.ResponseWriter, r *http.Request, userID primitive.ObjectID, tokenData models.AuthCodeTokenData) {
+	code := generateRandomToken()
+	now := time.Now()
+	authCode := models.AuthCode{
+		ID:        primitive.NewObjectID(),
+		Code:      code,
+		UserID:    userID,
+		TokenData: tokenData,
+		ExpiresAt: now.Add(60 * time.Second),
+		CreatedAt: now,
+	}
+	if _, err := h.db.AuthCodes().InsertOne(r.Context(), authCode); err != nil {
+		http.Redirect(w, r, h.frontendURL+"/login?error=code_generation_failed", http.StatusTemporaryRedirect)
+		return
+	}
+	redirectURL := fmt.Sprintf("%s/auth/callback?code=%s", h.frontendURL, code)
+	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+}
+
+// ExchangeCode handles POST /api/auth/exchange-code
+func (h *AuthHandler) ExchangeCode(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
+		respondWithError(w, http.StatusBadRequest, "Code is required")
+		return
+	}
+
+	// Atomically find and mark as used
+	now := time.Now()
+	var authCode models.AuthCode
+	err := h.db.AuthCodes().FindOneAndUpdate(r.Context(),
+		bson.M{"code": req.Code, "usedAt": nil, "expiresAt": bson.M{"$gt": now}},
+		bson.M{"$set": bson.M{"usedAt": now}},
+	).Decode(&authCode)
+	if err != nil {
+		respondWithError(w, http.StatusUnauthorized, "Invalid or expired code")
+		return
+	}
+
+	if authCode.TokenData.IsMFA {
+		respondWithJSON(w, http.StatusOK, map[string]interface{}{
+			"mfaRequired": true,
+			"mfaToken":    authCode.TokenData.MFAToken,
+		})
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"accessToken":  authCode.TokenData.AccessToken,
+		"refreshToken": authCode.TokenData.RefreshToken,
+	})
+}
+
 // --- Google OAuth ---
 
 func (h *AuthHandler) GoogleOAuth(w http.ResponseWriter, r *http.Request) {
@@ -1238,8 +1308,7 @@ func (h *AuthHandler) GoogleOAuthCallback(w http.ResponseWriter, r *http.Request
 			http.Redirect(w, r, h.frontendURL+"/login?error=token_generation_failed", http.StatusTemporaryRedirect)
 			return
 		}
-		redirectURL := fmt.Sprintf("%s/auth/mfa#mfa_token=%s", h.frontendURL, mfaToken)
-		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{MFAToken: mfaToken, IsMFA: true})
 		return
 	}
 
@@ -1263,9 +1332,7 @@ func (h *AuthHandler) GoogleOAuthCallback(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	redirectURL := fmt.Sprintf("%s/auth/callback#access_token=%s&refresh_token=%s",
-		h.frontendURL, accessToken, refreshToken)
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+	h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{AccessToken: accessToken, RefreshToken: refreshToken})
 }
 
 // --- GitHub OAuth ---
@@ -1371,8 +1438,7 @@ func (h *AuthHandler) GitHubOAuthCallback(w http.ResponseWriter, r *http.Request
 			http.Redirect(w, r, h.frontendURL+"/login?error=token_generation_failed", http.StatusTemporaryRedirect)
 			return
 		}
-		redirectURL := fmt.Sprintf("%s/auth/mfa#mfa_token=%s", h.frontendURL, mfaToken)
-		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{MFAToken: mfaToken, IsMFA: true})
 		return
 	}
 
@@ -1396,9 +1462,7 @@ func (h *AuthHandler) GitHubOAuthCallback(w http.ResponseWriter, r *http.Request
 		})
 	}
 
-	redirectURL := fmt.Sprintf("%s/auth/callback#access_token=%s&refresh_token=%s",
-		h.frontendURL, accessToken, refreshToken)
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+	h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{AccessToken: accessToken, RefreshToken: refreshToken})
 }
 
 // --- Microsoft OAuth ---
@@ -1509,8 +1573,7 @@ func (h *AuthHandler) MicrosoftOAuthCallback(w http.ResponseWriter, r *http.Requ
 			http.Redirect(w, r, h.frontendURL+"/login?error=token_generation_failed", http.StatusTemporaryRedirect)
 			return
 		}
-		redirectURL := fmt.Sprintf("%s/auth/mfa#mfa_token=%s", h.frontendURL, mfaToken)
-		http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+		h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{MFAToken: mfaToken, IsMFA: true})
 		return
 	}
 
@@ -1534,9 +1597,7 @@ func (h *AuthHandler) MicrosoftOAuthCallback(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	redirectURL := fmt.Sprintf("%s/auth/callback#access_token=%s&refresh_token=%s",
-		h.frontendURL, accessToken, refreshToken)
-	http.Redirect(w, r, redirectURL, http.StatusTemporaryRedirect)
+	h.createAuthCodeRedirect(w, r, user.ID, models.AuthCodeTokenData{AccessToken: accessToken, RefreshToken: refreshToken})
 }
 
 // --- Session Management ---
@@ -1839,6 +1900,19 @@ func (h *AuthHandler) acceptInvitationForUser(ctx context.Context, userID primit
 		return fmt.Errorf("invalid or expired invitation")
 	}
 
+	// Verify the accepting user's email matches the invitation
+	var acceptingUser models.User
+	if err := h.db.Users().FindOne(ctx, bson.M{"_id": userID}).Decode(&acceptingUser); err != nil {
+		return fmt.Errorf("user not found")
+	}
+	if !strings.EqualFold(acceptingUser.Email, invitation.Email) {
+		// Revert invitation status since FindOneAndUpdate already marked it accepted
+		h.db.Invitations().UpdateOne(ctx, bson.M{"_id": invitation.ID}, bson.M{
+			"$set": bson.M{"status": models.InvitationPending},
+		})
+		return fmt.Errorf("invitation was sent to a different email address")
+	}
+
 	count, _ := h.db.TenantMemberships().CountDocuments(ctx, bson.M{
 		"userId":   userID,
 		"tenantId": invitation.TenantID,
@@ -1874,14 +1948,20 @@ func (h *AuthHandler) acceptInvitationForUser(ctx context.Context, userID primit
 
 // --- Token utilities ---
 
-func storeRefreshToken(r *http.Request, database *db.MongoDB, userID primitive.ObjectID, rawToken string, ttl time.Duration) {
+func storeRefreshToken(r *http.Request, database *db.MongoDB, userID primitive.ObjectID, rawToken string, ttl time.Duration, familyID ...string) {
 	tokenHash := hashToken(rawToken)
 	now := time.Now()
+
+	fid := generateRandomToken()
+	if len(familyID) > 0 && familyID[0] != "" {
+		fid = familyID[0]
+	}
 
 	rt := models.RefreshToken{
 		ID:           primitive.NewObjectID(),
 		UserID:       userID,
 		TokenHash:    tokenHash,
+		FamilyID:     fid,
 		IPAddress:    middleware.GetClientIP(r),
 		UserAgent:    r.UserAgent(),
 		DeviceInfo:   auth.ParseUserAgent(r.UserAgent()),
@@ -1891,6 +1971,33 @@ func storeRefreshToken(r *http.Request, database *db.MongoDB, userID primitive.O
 		IsRevoked:    false,
 	}
 	database.RefreshTokens().InsertOne(r.Context(), rt)
+
+	// Enforce concurrent session limit (max 10 active sessions per user)
+	const maxSessions = 10
+	activeCount, _ := database.RefreshTokens().CountDocuments(r.Context(), bson.M{
+		"userId":    userID,
+		"isRevoked": false,
+		"expiresAt": bson.M{"$gt": now},
+	})
+	if activeCount > maxSessions {
+		// Find and revoke the oldest excess sessions
+		excess := activeCount - maxSessions
+		cursor, err := database.RefreshTokens().Find(r.Context(),
+			bson.M{"userId": userID, "isRevoked": false, "expiresAt": bson.M{"$gt": now}},
+			options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}).SetLimit(excess),
+		)
+		if err == nil {
+			defer cursor.Close(r.Context())
+			for cursor.Next(r.Context()) {
+				var old models.RefreshToken
+				if cursor.Decode(&old) == nil {
+					database.RefreshTokens().UpdateByID(r.Context(), old.ID, bson.M{
+						"$set": bson.M{"isRevoked": true},
+					})
+				}
+			}
+		}
+	}
 }
 
 // DeleteAccount allows users to delete their own account after password confirmation.

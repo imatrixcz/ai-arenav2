@@ -663,6 +663,21 @@ func (h *PlansHandler) ListPlansPublic(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify the authenticated user is a member of this tenant
+	user, ok := middleware.GetUserFromContext(r.Context())
+	if !ok {
+		respondWithError(w, http.StatusUnauthorized, "Not authenticated")
+		return
+	}
+	memberCount, _ := h.db.TenantMemberships().CountDocuments(r.Context(), bson.M{
+		"userId":   user.ID,
+		"tenantId": tenantID,
+	})
+	if memberCount == 0 {
+		respondWithError(w, http.StatusForbidden, "Not a member of this tenant")
+		return
+	}
+
 	// Get non-archived plans sorted by price then name
 	// If the tenant's current plan is archived, include it too
 	filter := bson.M{"isArchived": bson.M{"$ne": true}}

@@ -17,6 +17,7 @@ backend/vendor/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/test-results/
 
 # IDE
 .idea/
@@ -31,4 +32,5 @@ Thumbs.db
 
 # Environment
 .env
-.env.local
+.env.*
+!.env.example

@@ -26,6 +26,7 @@ import (
 func main() {
 	config.LoadEnvFile()
 	version.Load()
+	parseGlobalFlags()
 
 	if len(os.Args) < 2 {
 		printUsage()
@@ -53,6 +54,24 @@ func main() {
 		cmdVersion()
 	case "status":
 		cmdStatus()
+	case "logs":
+		cmdLogs()
+	case "users":
+		cmdUsers()
+	case "tenants":
+		cmdTenants()
+	case "health":
+		cmdHealth()
+	case "stats":
+		cmdStats()
+	case "doctor":
+		cmdDoctor()
+	case "financial":
+		cmdFinancial()
+	case "db":
+		cmdDB()
+	case "mcp":
+		cmdMCP()
 	case "help", "-h", "--help":
 		printUsage()
 	default:
@@ -66,35 +85,64 @@ func printUsage() {
 	fmt.Println(`lastsaas - LastSaaS system administration tool
 
 Usage:
-  lastsaas <command> [flags]
+  lastsaas <command> [flags] [--json]
 
 Commands:
-  setup             Initialize the system (create root tenant + owner account)
-  start             Start backend and/or frontend servers
-  stop              Stop running servers
-  restart           Restart servers (stop + start)
-  change-password   Change a user's password
-  send-message      Send a message to a user
-  transfer-root-owner  Transfer root tenant ownership to another user
-  config            Manage configuration variables (list, get, set)
-  version           Show software and database version
-  status            Check system and database status
-  help              Show this help message
+  setup                Initialize the system (create root tenant + owner account)
+  start                Start backend and/or frontend servers
+  stop                 Stop running servers
+  restart              Restart servers (stop + start)
+  status               Check system and database status
+  version              Show software and database version
+
+  logs                 View and tail system logs
+  users                Manage users (list, get, suspend, activate, revoke-sessions)
+  tenants              Manage tenants (list, get)
+  health               Show system health and node status
+  stats                Dashboard summary statistics
+  financial            Financial data and reporting (summary, transactions, metrics)
+  doctor               Run comprehensive system diagnostics
+  db                   Database statistics (stats)
+  mcp                  Start MCP server (stdio) for AI assistant integration
+
+  change-password      Change a user's password
+  send-message         Send a message to a user
+  transfer-root-owner  Transfer root tenant ownership
+  config               Manage configuration variables (list, get, set, reset)
+  help                 Show this help message
+
+Global flags:
+  --json               Output in JSON format (works with most commands)
 
 Examples:
   lastsaas setup
-  lastsaas start                     Start both backend and frontend
-  lastsaas start --backend           Start only the backend
-  lastsaas restart --frontend        Restart only the frontend
-  lastsaas stop                      Stop all servers
-  lastsaas change-password --email admin@example.com
-  lastsaas send-message --email admin@example.com --message "Hello!"
-  lastsaas transfer-root-owner --email newowner@example.com
+  lastsaas start --backend
+  lastsaas stop
+
+  lastsaas logs --severity critical,high --tail 100
+  lastsaas logs --follow --category security
+  lastsaas logs --from 24h
+  lastsaas users list --json
+  lastsaas users get --email admin@example.com
+  lastsaas users suspend --email bad@example.com
+  lastsaas tenants list
+  lastsaas tenants get root
+
+  lastsaas health
+  lastsaas stats --json
+  lastsaas financial summary
+  lastsaas financial transactions --type subscription --limit 50
+  lastsaas financial metrics --days 30
+  lastsaas doctor
+  lastsaas db stats
+
   lastsaas config list
   lastsaas config get log.min_level
   lastsaas config set log.min_level high
-  lastsaas version
-  lastsaas status`)
+  lastsaas config reset log.min_level
+  lastsaas change-password --email admin@example.com
+
+  LASTSAAS_URL=http://localhost:3000 LASTSAAS_API_KEY=lsk_xxx lastsaas mcp`)
 }
 
 // connectDB loads config and connects to MongoDB, printing helpful guidance on failure.
@@ -469,7 +517,8 @@ func cmdConfig() {
 Subcommands:
   list              List all configuration variables
   get <name>        Show details of a configuration variable
-  set <name> <val>  Update a configuration variable's value`)
+  set <name> <val>  Update a configuration variable's value
+  reset <name>      Reset a variable to its default value`)
 		os.Exit(1)
 	}
 
@@ -488,6 +537,12 @@ Subcommands:
 			os.Exit(1)
 		}
 		cmdConfigSet(os.Args[3], strings.Join(os.Args[4:], " "))
+	case "reset":
+		if len(os.Args) < 4 {
+			fmt.Fprintln(os.Stderr, "Usage: lastsaas config reset <name>")
+			os.Exit(1)
+		}
+		cmdConfigReset(os.Args[3])
 	default:
 		fmt.Fprintf(os.Stderr, "Unknown config subcommand: %s\n", os.Args[2])
 		os.Exit(1)
@@ -512,6 +567,11 @@ func cmdConfigList() {
 	if err := cursor.All(ctx, &vars); err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to read config vars: %v\n", err)
 		os.Exit(1)
+	}
+
+	if jsonOutput {
+		printJSON(vars)
+		return
 	}
 
 	if len(vars) == 0 {
@@ -548,6 +608,11 @@ func cmdConfigGet(name string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Config variable not found: %s\n", name)
 		os.Exit(1)
+	}
+
+	if jsonOutput {
+		printJSON(v)
+		return
 	}
 
 	fmt.Printf("Name:        %s\n", v.Name)
@@ -590,6 +655,54 @@ func cmdConfigSet(name, value string) {
 	}
 
 	fmt.Printf("Updated '%s' successfully.\n", name)
+	fmt.Println("Note: The running server will pick up this change on next cache reload or restart.")
+}
+
+func cmdConfigReset(name string) {
+	// Find the default value from SystemDefaults
+	var defaultVal string
+	found := false
+	for _, def := range configstore.SystemDefaults {
+		if def.Name == name {
+			defaultVal = def.Value
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "No system default found for: %s\n", name)
+		fmt.Fprintln(os.Stderr, "Only system-defined variables can be reset to defaults.")
+		os.Exit(1)
+	}
+
+	database, _, cleanup := connectDB()
+	defer cleanup()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var v models.ConfigVar
+	err := database.ConfigVars().FindOne(ctx, bson.M{"name": name}).Decode(&v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Config variable not found in database: %s\n", name)
+		os.Exit(1)
+	}
+
+	if v.Value == defaultVal {
+		fmt.Printf("'%s' is already at its default value.\n", name)
+		return
+	}
+
+	_, err = database.ConfigVars().UpdateOne(ctx,
+		bson.M{"name": name},
+		bson.M{"$set": bson.M{"value": defaultVal, "updatedAt": time.Now()}},
+	)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to reset config variable: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Reset '%s' to default value.\n", name)
 	fmt.Println("Note: The running server will pick up this change on next cache reload or restart.")
 }
 

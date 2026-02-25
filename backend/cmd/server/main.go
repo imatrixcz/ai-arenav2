@@ -356,6 +356,9 @@ func main() {
 
 	guarded.HandleFunc("/auth/reset-password", authHandler.ResetPassword).Methods("POST")
 
+	// OAuth code exchange (public — exchanges one-time code for tokens)
+	guarded.HandleFunc("/auth/exchange-code", authHandler.ExchangeCode).Methods("POST")
+
 	// Auth providers discovery (public)
 	guarded.HandleFunc("/auth/providers", authHandler.GetProviders).Methods("GET")
 
@@ -516,6 +519,7 @@ func main() {
 	adminAPI.HandleFunc("/config/{name}", configHandler.UpdateConfig).Methods("PUT")
 	adminAPI.HandleFunc("/config/{name}", configHandler.DeleteConfig).Methods("DELETE")
 	adminAPI.HandleFunc("/tenants", adminHandler.ListTenants).Methods("GET")
+	adminAPI.HandleFunc("/tenants/export", adminHandler.ExportTenantsCSV).Methods("GET")
 	adminAPI.HandleFunc("/tenants/{tenantId}", adminHandler.GetTenant).Methods("GET")
 	adminAPI.HandleFunc("/plans", plansHandler.ListPlans).Methods("GET")
 	adminAPI.HandleFunc("/plans/{planId}", plansHandler.GetPlan).Methods("GET")
@@ -548,6 +552,7 @@ func main() {
 	adminOwner.HandleFunc("/tenants/{tenantId}", adminHandler.UpdateTenant).Methods("PUT")
 	adminOwner.HandleFunc("/tenants/{tenantId}/status", adminHandler.UpdateTenantStatus).Methods("PATCH")
 	adminOwner.HandleFunc("/users", adminHandler.ListUsers).Methods("GET")
+	adminOwner.HandleFunc("/users/export", adminHandler.ExportUsersCSV).Methods("GET")
 	adminOwner.HandleFunc("/users/{userId}", adminHandler.GetUser).Methods("GET")
 	adminOwner.HandleFunc("/users/{userId}", adminHandler.UpdateUser).Methods("PUT")
 	adminOwner.HandleFunc("/users/{userId}/status", adminHandler.UpdateUserStatus).Methods("PATCH")
@@ -600,7 +605,7 @@ func main() {
 	})
 
 	// Wrap with security headers + CORS + metrics
-	handler := middleware.SecurityHeaders(c.Handler(metricsCollector.Middleware(router)))
+	handler := middleware.BodySizeLimit(middleware.SecurityHeaders(c.Handler(metricsCollector.Middleware(router))))
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)

@@ -29,6 +29,7 @@ type RefreshToken struct {
 	ID           primitive.ObjectID `json:"id" bson:"_id,omitempty"`
 	UserID       primitive.ObjectID `json:"userId" bson:"userId"`
 	TokenHash    string             `json:"-" bson:"tokenHash"`
+	FamilyID     string             `json:"familyId,omitempty" bson:"familyId,omitempty"`
 	IPAddress    string             `json:"ipAddress,omitempty" bson:"ipAddress,omitempty"`
 	UserAgent    string             `json:"userAgent,omitempty" bson:"userAgent,omitempty"`
 	DeviceInfo   string             `json:"deviceInfo,omitempty" bson:"deviceInfo,omitempty"`
@@ -49,5 +50,22 @@ type OAuthState struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	State     string             `bson:"state"`
 	ExpiresAt time.Time          `bson:"expiresAt"`
+	CreatedAt time.Time          `bson:"createdAt"`
+}
+
+type AuthCodeTokenData struct {
+	AccessToken  string `bson:"accessToken,omitempty"`
+	RefreshToken string `bson:"refreshToken,omitempty"`
+	MFAToken     string `bson:"mfaToken,omitempty"`
+	IsMFA        bool   `bson:"isMfa,omitempty"`
+}
+
+type AuthCode struct {
+	ID        primitive.ObjectID `bson:"_id,omitempty"`
+	Code      string             `bson:"code"`
+	UserID    primitive.ObjectID `bson:"userId"`
+	TokenData AuthCodeTokenData  `bson:"tokenData"`
+	ExpiresAt time.Time          `bson:"expiresAt"`
+	UsedAt    *time.Time         `bson:"usedAt,omitempty"`
 	CreatedAt time.Time          `bson:"createdAt"`
 }

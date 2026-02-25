@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Users, CheckCircle, XCircle, Search, ChevronLeft, ChevronRight, ArrowUpDown, UserCheck } from 'lucide-react';
+import { Users, CheckCircle, XCircle, Search, ChevronLeft, ChevronRight, ArrowUpDown, UserCheck, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminApi, setAuthToken } from '../../api/client';
 import { getErrorMessage } from '../../utils/errors';
@@ -10,6 +10,23 @@ import TableSkeleton from '../../components/TableSkeleton';
 import ConfirmModal from '../../components/ConfirmModal';
 
 const PAGE_SIZE = 25;
+
+function relativeTime(dateStr?: string): string {
+  if (!dateStr) return 'Never';
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffSec = Math.floor((now - then) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 30) return `${diffDay}d ago`;
+  const diffMonth = Math.floor(diffDay / 30);
+  if (diffMonth < 12) return `${diffMonth}mo ago`;
+  return `${Math.floor(diffMonth / 12)}y ago`;
+}
 
 export default function UsersPage() {
   const navigate = useNavigate();
@@ -22,14 +39,15 @@ export default function UsersPage() {
   const [search, setSearch] = useState(searchParams.get('search') || '');
   const [page, setPage] = useState(Number(searchParams.get('page')) || 1);
   const [sort, setSort] = useState(searchParams.get('sort') || '-createdAt');
+  const [status, setStatus] = useState(searchParams.get('status') || '');
   const [statusTarget, setStatusTarget] = useState<UserListItem | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const fetchUsers = useCallback(async (p: number, q: string, s: string) => {
+  const fetchUsers = useCallback(async (p: number, q: string, s: string, st: string) => {
     setLoading(true);
     try {
-      const data = await adminApi.listUsers({ page: p, limit: PAGE_SIZE, search: q || undefined, sort: s });
+      const data = await adminApi.listUsers({ page: p, limit: PAGE_SIZE, search: q || undefined, sort: s, status: st || undefined });
       setUsers(data.users || []);
       setTotal(data.total);
     } catch (err) {
@@ -45,13 +63,14 @@ export default function UsersPage() {
     if (page > 1) params.page = String(page);
     if (search) params.search = search;
     if (sort && sort !== '-createdAt') params.sort = sort;
+    if (status) params.status = status;
     setSearchParams(params, { replace: true });
-  }, [page, search, sort, setSearchParams]);
+  }, [page, search, sort, status, setSearchParams]);
 
-  // Fetch on page/sort change
+  // Fetch on page/sort/status change
   useEffect(() => {
-    fetchUsers(page, search, sort);
-  }, [page, sort, fetchUsers]); // eslint-disable-line react-hooks/exhaustive-deps
+    fetchUsers(page, search, sort, status);
+  }, [page, sort, status, fetchUsers]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Debounced search
   const handleSearchChange = (value: string) => {
@@ -59,13 +78,32 @@ export default function UsersPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
       setPage(1);
-      fetchUsers(1, value, sort);
+      fetchUsers(1, value, sort, status);
     }, 300);
   };
 
   const toggleSort = (field: string) => {
     setSort(prev => prev === field ? `-${field}` : prev === `-${field}` ? field : field);
     setPage(1);
+  };
+
+  const handleStatusChange = (value: string) => {
+    setStatus(value);
+    setPage(1);
+  };
+
+  const handleExport = async () => {
+    try {
+      const blob = await adminApi.exportUsersCSV({ search: search || undefined, status: status || undefined });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'users.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      // ignore
+    }
   };
 
   const toggleStatus = async (user: UserListItem) => {
@@ -108,11 +146,19 @@ export default function UsersPage() {
           </h1>
           <p className="text-dark-400 mt-1">{total.toLocaleString()} total users</p>
         </div>
+        <button
+          onClick={handleExport}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-dark-300 hover:text-white transition-colors"
+          title="Download CSV"
+        >
+          <Download className="w-3.5 h-3.5" />
+          CSV
+        </button>
       </div>
 
-      {/* Search */}
-      <div className="mb-4">
-        <div className="relative max-w-md">
+      {/* Search + Filters */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-dark-500" />
           <input
             type="text"
@@ -122,12 +168,21 @@ export default function UsersPage() {
             className="w-full pl-10 pr-4 py-2.5 bg-dark-800 border border-dark-700 rounded-lg text-white placeholder-dark-500 focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500 transition-colors text-sm"
           />
         </div>
+        <select
+          value={status}
+          onChange={(e) => handleStatusChange(e.target.value)}
+          className="px-3 py-2.5 bg-dark-800 border border-dark-700 rounded-lg text-sm text-white focus:outline-none focus:border-primary-500"
+        >
+          <option value="">All statuses</option>
+          <option value="active">Active</option>
+          <option value="disabled">Disabled</option>
+        </select>
       </div>
 
       {/* Table */}
       <div className="bg-dark-900/50 backdrop-blur-sm border border-dark-800 rounded-2xl overflow-hidden">
         {loading && users.length === 0 ? (
-          <TableSkeleton rows={8} cols={6} />
+          <TableSkeleton rows={8} cols={7} />
         ) : users.length === 0 ? (
           <div className="py-16 text-center text-dark-400">
             {search ? 'No users match your search.' : 'No users yet.'}
@@ -152,6 +207,7 @@ export default function UsersPage() {
                         <ArrowUpDown className="w-3 h-3" />
                       </button>
                     </th>
+                    <th className="text-left px-6 py-3.5 text-sm font-medium text-dark-400">Last Login</th>
                     <th className="text-left px-6 py-3.5 text-sm font-medium text-dark-400">Status</th>
                     <th className="text-right px-6 py-3.5 text-sm font-medium text-dark-400">Actions</th>
                   </tr>
@@ -177,6 +233,9 @@ export default function UsersPage() {
                       <td className="px-6 py-3.5 text-sm text-dark-300">{user.tenantCount}</td>
                       <td className="px-6 py-3.5 text-sm text-dark-400">
                         {new Date(user.createdAt).toLocaleDateString()}
+                      </td>
+                      <td className="px-6 py-3.5 text-sm text-dark-400" title={user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString() : undefined}>
+                        {relativeTime(user.lastLoginAt)}
                       </td>
                       <td className="px-6 py-3.5">
                         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${

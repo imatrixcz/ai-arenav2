@@ -163,8 +163,8 @@ func (m *AuthMiddleware) isTokenRevoked(ctx context.Context, rawToken string) bo
 
 	count, err := m.db.RevokedTokens().CountDocuments(ctx, bson.M{"tokenHash": tokenHash})
 	if err != nil {
-		log.Printf("Warning: revoked-token lookup failed: %v", err)
-		return false
+		log.Printf("Warning: revoked-token lookup failed (denying access): %v", err)
+		return true
 	}
 	return count > 0
 }

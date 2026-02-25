@@ -1,40 +1,43 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
+import { authApi } from '../../api/client';
 import LoadingSpinner from '../../components/LoadingSpinner';
 
 export default function AuthCallbackPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { loginWithTokens } = useAuth();
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const hash = window.location.hash.substring(1);
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    const refreshToken = params.get('refresh_token');
-    const mfaToken = params.get('mfa_token');
-    const errorParam = params.get('error');
+    const code = searchParams.get('code');
+    const errorParam = searchParams.get('error');
 
     if (errorParam) {
       setError(errorParam);
       return;
     }
 
-    // MFA required after OAuth login
-    if (mfaToken) {
-      navigate(`/auth/mfa?token=${encodeURIComponent(mfaToken)}`);
+    if (!code) {
+      setError('Missing authentication code');
       return;
     }
 
-    if (accessToken && refreshToken) {
-      loginWithTokens(accessToken, refreshToken)
-        .then(() => navigate('/dashboard'))
-        .catch(() => setError('Failed to complete authentication'));
-    } else {
-      setError('Missing authentication tokens');
-    }
-  }, [loginWithTokens, navigate]);
+    authApi.exchangeCode(code)
+      .then((data) => {
+        if (data.mfaRequired && data.mfaToken) {
+          navigate(`/auth/mfa?token=${encodeURIComponent(data.mfaToken)}`);
+          return;
+        }
+        if (data.accessToken && data.refreshToken) {
+          return loginWithTokens(data.accessToken, data.refreshToken)
+            .then(() => navigate('/dashboard'));
+        }
+        setError('Invalid authentication response');
+      })
+      .catch(() => setError('Failed to complete authentication'));
+  }, [searchParams, loginWithTokens, navigate]);
 
   if (error) {
     return (

@@ -198,6 +198,26 @@ func (h *BrandingHandler) UpdateBranding(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Enforce size limits on HTML/CSS fields
+	const maxHTMLSize = 512 * 1024  // 512KB
+	const maxCSSSize = 128 * 1024   // 128KB
+	if len(req.LandingHTML) > maxHTMLSize {
+		respondWithError(w, http.StatusBadRequest, "Landing HTML exceeds 512KB limit")
+		return
+	}
+	if len(req.DashboardHTML) > maxHTMLSize {
+		respondWithError(w, http.StatusBadRequest, "Dashboard HTML exceeds 512KB limit")
+		return
+	}
+	if len(req.HeadHTML) > maxHTMLSize {
+		respondWithError(w, http.StatusBadRequest, "Head HTML exceeds 512KB limit")
+		return
+	}
+	if len(req.CustomCSS) > maxCSSSize {
+		respondWithError(w, http.StatusBadRequest, "Custom CSS exceeds 128KB limit")
+		return
+	}
+
 	now := time.Now()
 	update := bson.M{
 		"$set": bson.M{

@@ -44,6 +44,11 @@ func NewPasswordService() *PasswordService {
 	return &PasswordService{cost: bcryptCost}
 }
 
+// NewTestPasswordService returns a PasswordService with minimal bcrypt cost for fast tests.
+func NewTestPasswordService() *PasswordService {
+	return &PasswordService{cost: 4}
+}
+
 func (s *PasswordService) HashPassword(password string) (string, error) {
 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), s.cost)
 	if err != nil {

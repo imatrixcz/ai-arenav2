@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/base32"
 	"encoding/base64"
 	"fmt"
@@ -53,7 +54,7 @@ func (s *TOTPService) ValidateRecoveryCode(code string, hashedCodes []string) (i
 	hash := sha256.Sum256([]byte(code))
 	codeHash := base64.StdEncoding.EncodeToString(hash[:])
 	for i, h := range hashedCodes {
-		if h == codeHash {
+		if subtle.ConstantTimeCompare([]byte(h), []byte(codeHash)) == 1 {
 			return i, true
 		}
 	}

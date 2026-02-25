@@ -263,6 +263,13 @@ func (m *MongoDB) ensureIndexes() {
 			},
 		},
 		{
+			"auth_codes",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "code", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "expiresAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
+			},
+		},
+		{
 			"usage_events",
 			[]mongo.IndexModel{
 				{Keys: bson.D{{Key: "tenantId", Value: 1}, {Key: "createdAt", Value: -1}}},
@@ -421,4 +428,8 @@ func (m *MongoDB) Announcements() *mongo.Collection {
 
 func (m *MongoDB) UsageEvents() *mongo.Collection {
 	return m.Database.Collection("usage_events")
+}
+
+func (m *MongoDB) AuthCodes() *mongo.Collection {
+	return m.Database.Collection("auth_codes")
 }

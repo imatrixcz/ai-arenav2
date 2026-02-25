@@ -287,7 +287,8 @@ func (h *PromotionsHandler) CreatePromotion(w http.ResponseWriter, r *http.Reque
 
 			productIDs, err := h.resolveStripeProducts(ctx, item.Type, objID, currency)
 			if err != nil {
-				respondWithError(w, http.StatusInternalServerError, "Failed to resolve Stripe product: "+err.Error())
+				log.Printf("Failed to resolve Stripe product for %s/%s: %v", item.Type, item.ID, err)
+			respondWithError(w, http.StatusInternalServerError, "Failed to resolve Stripe product")
 				return
 			}
 			stripeProductIDs = append(stripeProductIDs, productIDs...)
