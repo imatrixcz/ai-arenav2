@@ -4,7 +4,7 @@
 
 LastSaaS is a complete, production-ready SaaS foundation built entirely through conversation with [Claude Code](https://claude.ai/claude-code). It gives you multi-tenant account management, authentication, role-based access control, white-label branding, Stripe billing, API keys, outgoing webhooks, a full admin interface, system health monitoring, and credit-based usage tracking — everything you need to launch a SaaS business, ready to customize for your specific product.
 
-The bottleneck for building software isn't engineering capacity anymore — it's imagination. LastSaaS proves it: a single person with a clear vision and an AI agent can stand up what used to require a team and months of work. Now anyone can stand up a complete SaaS business using Claude Code.
+The bottleneck for building software isn't engineering capacity anymore — it's imagination. LastSaaS proves it: a single person with a clear vision and an AI agent can stand up what used to require a team and months of work. And because it was built with [Claude Code](https://claude.ai/claude-code), the codebase is fork-ready for agentic engineering — point an AI agent at it and keep building your product through conversation.
 
 **[Project Page](https://metavert.io/lastsaas)**
 
@@ -14,7 +14,7 @@ The bottleneck for building software isn't engineering capacity anymore — it's
 
 Every SaaS product needs the same boring foundation: user accounts, teams, roles, authentication, admin dashboards, billing, usage limits, branding, webhooks, API keys. Historically, building that foundation meant weeks of plumbing before you could write a single line of your actual product.
 
-LastSaaS eliminates that. Fork it, point Claude Code at it, and start building your product on top of a foundation that already handles:
+LastSaaS eliminates that. Fork it, point an AI agent at it, and start building your product on top of a foundation that already handles:
 
 - Multi-tenant isolation with role-based access
 - JWT authentication with refresh token rotation
@@ -38,7 +38,7 @@ LastSaaS eliminates that. Fork it, point Claude Code at it, and start building y
 - Auto-versioning with database migrations
 - Production deployment on Fly.io
 
-This is open-source infrastructure for the creator era of software — where the person with the idea is also the person who ships it.
+This is open-source infrastructure for the agentic era of software — where the person with the idea is also the person who ships it. The codebase follows consistent patterns that AI agents navigate fluently, so you can keep evolving it the same way it was built.
 
 ---
 
@@ -493,9 +493,13 @@ The Docker image works anywhere containers run. The only external dependency is 
 
 ---
 
-## Extending LastSaaS
+## Fork It and Keep Building with AI
 
-LastSaaS is designed to be a starting point. Fork it and build your product on top:
+LastSaaS was built entirely through conversation with [Claude Code](https://claude.ai/claude-code) — every feature, every handler, every component was described in natural language and implemented by an AI agent. But the real point isn't that it *was* built this way — it's that it's designed to *keep* being built this way.
+
+The codebase follows consistent patterns, uses clear naming, and maintains a structure that AI agents navigate fluently. Fork it, point Claude Code at it, and start describing your product. The agent already understands the patterns — authentication, tenancy, billing, middleware, events — and builds on top of them naturally. You're not starting from scratch; you're continuing a conversation.
+
+Here's what's already wired up for you:
 
 1. **Add your product's data models** in `backend/internal/models/`
 2. **Add API handlers** in `backend/internal/api/handlers/`
@@ -508,8 +512,6 @@ LastSaaS is designed to be a starting point. Fork it and build your product on t
 9. **Use the event emitter** — emit events from your handlers and they'll automatically be delivered to configured webhooks
 10. **Use API keys** — your endpoints automatically support both JWT and API key authentication
 11. **Use the branding system** — your UI inherits the white-label theme automatically via the BrandingContext
-
-The entire codebase was built conversationally with Claude Code. You can keep building it the same way — describe what you want, and let the agent implement it on top of the existing patterns.
 
 ---
 
