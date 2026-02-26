@@ -43,6 +43,44 @@ This is open-source infrastructure for the agentic era of software — where the
 
 ---
 
+## How It Compares
+
+If you're evaluating SaaS boilerplates, you've probably looked at ShipFast, Supastarter, MakerKit, SaaS Pegasus, and Gravity. Here's why technical founders choose LastSaaS instead.
+
+**Free and open-source.** ShipFast costs $169, MakerKit runs $199–599, Supastarter starts at $299, SaaS Pegasus charges $249/year, and Gravity is under $1K. LastSaaS is MIT-licensed — fork it, ship it, never pay a license fee. You own the code completely.
+
+**Go backend, not another Next.js project.** ShipFast, Supastarter, MakerKit, and Gravity are all JavaScript/TypeScript stacks. SaaS Pegasus uses Django. LastSaaS pairs a Go backend with a React + TypeScript frontend — giving you compiled-binary deployment, low memory footprint (a 14MB Alpine container), and the concurrency model that Go is known for. If your SaaS will handle real traffic or you want a backend that isn't a Node.js monolith, this matters.
+
+**Genuine multi-tenancy.** ShipFast has no multi-tenancy at all. SaaS Pegasus and Gravity offer basic team features but not true tenant isolation. LastSaaS gives you full multi-tenant architecture: tenant-scoped data isolation, three-tier RBAC (owner/admin/user), team invitations, ownership transfer, per-tenant activity logs, and per-tenant billing. This is the difference between "users can collaborate" and "each customer gets their own isolated workspace."
+
+**White-label branding built in.** Most boilerplates give you a theme toggle at best. LastSaaS includes a full white-label system: custom app name, logo, colors, fonts, landing page, custom pages, CSS injection, favicon, configurable navigation with entitlement gating, and auth page customization. If you're building a platform where customers see your brand (not yours-plus-a-framework), this saves weeks.
+
+**Outgoing webhooks, not just Stripe webhooks.** None of the alternatives — ShipFast, Supastarter, MakerKit, SaaS Pegasus, or Gravity — include an outgoing webhook system. LastSaaS ships with 19 event types across billing, team lifecycle, user lifecycle, credits, and security events, with HMAC-SHA256 signing, delivery tracking, and test events. Your customers can integrate with your platform from day one.
+
+**API keys with scoped access.** ShipFast, Supastarter, and MakerKit don't include API key management. LastSaaS provides `lsk_`-prefixed API keys with admin and user authority scopes, SHA-256 hashed storage, and last-used tracking — ready for your customers to build integrations.
+
+**Health monitoring and financial dashboards.** No competing boilerplate includes system health monitoring. LastSaaS collects CPU, memory, disk, HTTP, and MongoDB metrics every 60 seconds across all nodes, with 8 real-time charts, threshold alerting, and 30-day retention. The financial dashboard gives you revenue, ARR, DAU, and MAU time-series out of the box.
+
+**MCP server for AI-native operations.** This is unique to LastSaaS. A built-in Model Context Protocol server with 26 read-only tools lets you connect Claude (or any MCP-compatible AI) directly to your running application. Query your ARR trend, investigate error spikes, audit API keys, or review system health — all in natural language. No other SaaS boilerplate offers agentic admin access.
+
+**Built for AI-assisted development.** LastSaaS was built entirely through conversation with Claude Code, and the codebase is designed to keep being built that way. Consistent patterns, clear naming, and a structure AI agents navigate fluently. Fork it, point an agent at it, describe your product, and keep going. The competing boilerplates were built for manual development — LastSaaS is built for the way software is made now.
+
+| | LastSaaS | ShipFast | Supastarter | MakerKit | Pegasus | Gravity |
+|---|---|---|---|---|---|---|
+| **Price** | **Free (MIT)** | $169 | $299+ | $199–599 | $249/yr | <$1K |
+| **Stack** | Go + React | Next.js | Next.js / Nuxt | Next.js | Django | Node + React |
+| **Multi-Tenancy** | Full RBAC | — | ✓ | ✓ | Teams only | Teams only |
+| **White-Label** | Full | — | Partial | Partial | — | — |
+| **Webhooks** | 19 events | — | — | — | — | — |
+| **API Keys** | Scoped | — | — | — | Basic | — |
+| **Health Monitoring** | 8 charts | — | — | — | — | — |
+| **Credit System** | Dual buckets | — | — | Basic | — | — |
+| **MCP Server** | 26 tools | — | — | — | — | — |
+| **Admin Dashboard** | Full | — | ✓ | ✓ | ✓ | Basic |
+| **Stripe Billing** | Full | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+---
+
 ## Features
 
 ### Authentication & Identity
