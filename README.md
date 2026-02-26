@@ -2,7 +2,7 @@
 
 **The last SaaS boilerplate you'll ever need.**
 
-LastSaaS is a complete, production-ready SaaS foundation built entirely through conversation with [Claude Code](https://claude.ai/claude-code). It gives you multi-tenant account management, authentication, role-based access control, a full admin interface, system health monitoring, billing plans, and credit-based usage tracking — everything you need to launch a SaaS business, ready to customize for your specific product.
+LastSaaS is a complete, production-ready SaaS foundation built entirely through conversation with [Claude Code](https://claude.ai/claude-code). It gives you multi-tenant account management, authentication, role-based access control, white-label branding, Stripe billing, API keys, outgoing webhooks, a full admin interface, system health monitoring, and credit-based usage tracking — everything you need to launch a SaaS business, ready to customize for your specific product.
 
 The bottleneck for building software isn't engineering capacity anymore — it's imagination. LastSaaS proves it: a single person with a clear vision and an AI agent can stand up what used to require a team and months of work. Now anyone can stand up a complete SaaS business using Claude Code.
 
@@ -12,20 +12,30 @@ The bottleneck for building software isn't engineering capacity anymore — it's
 
 ## Why LastSaaS Exists
 
-Every SaaS product needs the same boring foundation: user accounts, teams, roles, authentication, admin dashboards, billing, usage limits. Historically, building that foundation meant weeks of plumbing before you could write a single line of your actual product.
+Every SaaS product needs the same boring foundation: user accounts, teams, roles, authentication, admin dashboards, billing, usage limits, branding, webhooks, API keys. Historically, building that foundation meant weeks of plumbing before you could write a single line of your actual product.
 
 LastSaaS eliminates that. Fork it, point Claude Code at it, and start building your product on top of a foundation that already handles:
 
 - Multi-tenant isolation with role-based access
-- JWT authentication with refresh tokens
-- Google OAuth integration
+- JWT authentication with refresh token rotation
+- Google, GitHub, and Microsoft OAuth integration
+- Magic link passwordless authentication
+- MFA/TOTP with recovery codes
 - Email verification and password resets
 - Team invitations and member management
-- Subscription plans with entitlements
+- Stripe billing with subscriptions, per-seat pricing, trials, and credit bundles
+- Plan entitlements and billing enforcement middleware
+- White-label branding with custom themes, logos, landing pages, and custom pages
+- API key authentication (admin and user scopes)
+- Outgoing webhooks with 19 event types and HMAC-SHA256 signing
 - Credit-based usage tracking (subscription + purchased buckets)
+- Promotion codes and coupon management via Stripe
 - A full admin interface for managing everything
+- Built-in API documentation (HTML and Markdown)
 - Real-time system health monitoring
+- Financial metrics dashboard (revenue, ARR, DAU, MAU)
 - CLI tools for server administration
+- Auto-versioning with database migrations
 - Production deployment on Fly.io
 
 This is open-source infrastructure for the creator era of software — where the person with the idea is also the person who ships it.
@@ -37,37 +47,103 @@ This is open-source infrastructure for the creator era of software — where the
 ### Authentication & Identity
 - Email/password registration with bcrypt hashing
 - Email verification via [Resend](https://resend.com)
-- Google OAuth with automatic account linking
-- JWT access tokens (30min) + refresh tokens (7 days)
+- Google, GitHub, and Microsoft OAuth with automatic account linking
+- Magic link passwordless login via email
+- MFA/TOTP two-factor authentication with setup wizard
+- Recovery codes for MFA backup access
+- JWT access tokens (30min) + refresh tokens (7 days) with rotation
 - Account lockout after failed login attempts
 - Password reset flow with secure tokens
 - Password strength enforcement
+- Session management — list active sessions, revoke individual or all sessions
+- Session revocation on password change
 
 ### Multi-Tenancy
 - Root tenant (system admin) + customer tenants
 - Users belong to tenants via memberships
-- Roles: **owner**, **admin**, **user**
+- Roles: **owner**, **admin**, **user** with hierarchical permissions
 - Team invitations with email notifications
 - Ownership transfer between members
+- Per-tenant activity log
+- Tenant settings self-service
 
-### Billing & Credits
-- Subscription plans with monthly pricing and annual discounts
-- Per-plan entitlements (boolean and numeric)
-- Usage credits with configurable reset policies (reset or accrue)
-- Dual credit buckets: subscription credits + purchased credits
-- Credit bundles for one-time purchases
-- Billing waiver for special accounts
+### Billing & Credits (Stripe)
+- **Subscription plans** with monthly and annual billing (configurable annual discount %)
+- **Pricing models**: flat-rate or per-seat (with included seats, min/max seat limits)
+- **Free trials** with configurable trial days per plan and trial abuse prevention
+- **Credit bundles** for one-time purchases
+- **Dual credit buckets**: subscription credits (reset or accrue) + purchased credits
+- **Stripe Checkout** (redirect-based) for payment collection
+- **Stripe Billing Portal** for customer self-service (payment methods, invoices)
+- **Multi-currency support** with configurable default currency
+- **Stripe Tax** automatic tax calculation
+- **Promotion codes and coupons** — create and manage via admin UI, linked to Stripe
+- **Invoice generation** — sequential invoice numbers, PDF download, tax breakdown
+- **Transaction history** — per-tenant and admin-wide with search and filtering
+- **Financial metrics** — revenue, ARR, DAU, MAU time-series with charting
+- **Billing enforcement middleware** — blocks expired subscriptions from paid features
+- **Entitlement middleware** — gate features based on plan (boolean and numeric entitlements)
+- **Billing waiver** for special accounts (root tenant, demo accounts)
+- **Admin subscription management** — cancel, modify, reassign plans
+- **Refund and dispute handling** — webhook handlers for `charge.refunded`, `charge.dispute.created`, `charge.dispute.closed`
+
+### White-Label Branding
+- Custom app name, tagline, and logo (text, image, or both modes)
+- Theme colors (primary, accent, background, surface, text) with auto-generated shade palettes
+- Custom fonts (body and heading)
+- Custom landing page with configurable HTML
+- Custom pages served at `/p/{slug}` with SEO metadata
+- Custom CSS injection
+- Custom head HTML injection (analytics, meta tags)
+- Favicon upload
+- Media library for image/asset management
+- Configurable navigation sidebar with entitlement-gated items
+- Auth page customization (login/signup headings and subtext)
+- Dashboard HTML customization
+- Open Graph image support
+
+### API Keys
+- Create API keys with `lsk_` prefix
+- Two authority levels: **admin** (auto-resolves root tenant) and **user** (requires X-Tenant-ID)
+- SHA-256 hashed storage — raw key shown only at creation
+- Last-used timestamp tracking
+- Admin UI for key management
+- Supports both JWT and API key authentication on all endpoints
+
+### Outgoing Webhooks
+- 19 event types across 5 tiers:
+  - **Billing**: subscription.activated, subscription.canceled, payment.received, payment.failed
+  - **Team lifecycle**: member.invited, member.joined, member.removed, member.role_changed, ownership.transferred
+  - **User lifecycle**: user.registered, user.verified, user.deactivated
+  - **Credits & billing**: credits.purchased, plan.changed, tenant.created, tenant.deactivated
+  - **Audit & security**: user.deleted, tenant.deleted, api_key.created, api_key.revoked
+- HMAC-SHA256 payload signing with `whsec_`-prefixed secrets
+- Delivery tracking with response codes, response bodies, and duration
+- Test event delivery
+- Secret regeneration
+- Event type filtering per webhook
 
 ### Admin Interface
-- Dashboard with system overview
-- User management (list, view, edit, suspend, delete with ownership preflight)
-- Tenant management (list, view, edit, plan assignment, status control)
-- Plan management (create, edit, entitlements, assign to tenants)
-- Credit bundle management
-- System log viewer with severity filtering
-- Configuration variable editor (strings, numbers, enums, templates)
-- In-app messaging system
-- System health monitoring (see below)
+- **Dashboard** with user/tenant counts, health overview, and business metrics
+- **User management** — list, search, view profiles, edit, suspend, impersonate, delete with ownership preflight
+- **Tenant management** — list, view, edit, plan assignment, status control, subscription management
+- **Financial overview** — transaction history across all tenants, revenue/ARR/DAU/MAU charts
+- **Plan management** — create, edit, archive, entitlements, per-seat configuration, trial days
+- **Credit bundle management** — create, edit, sort, activate/deactivate
+- **Promotions** — create and manage Stripe promotion codes and coupons
+- **Branding editor** — theme colors, logos, fonts, landing page, custom pages, CSS, navigation
+- **API key management** — create, view, revoke
+- **Webhook management** — create, edit, delete, test, view delivery history
+- **Announcements** — publish system-wide announcements
+- **System log viewer** with severity filtering, search, and user filtering
+- **Configuration variable editor** (strings, numbers, enums, templates)
+- **In-app messaging** — send messages to individual users
+- **Root members** — manage the admin team with invitations and role changes
+- **CSV export** for users and tenants
+- **Admin impersonation** — log in as any user for debugging
+- **System health monitoring** (see below)
+- **Integration health checks** — MongoDB, Stripe, Resend, Google OAuth status
+- Three-tier admin access: **user** (read-only), **admin** (read-write), **owner** (destructive operations)
 
 ### System Health Monitoring
 - Automatic node registration with heartbeat (30s interval)
@@ -78,6 +154,24 @@ This is open-source infrastructure for the creator era of software — where the
 - Real-time dashboard with 8 time-series charts (Recharts)
 - Aggregate, all-nodes overlay, and single-node filter modes
 - Time range selection: 1h, 6h, 24h, 7d, 30d
+- Integration health panel (MongoDB, Stripe, Resend, Google OAuth connectivity)
+
+### User Self-Service
+- Profile editing (display name, email)
+- Theme preference (light/dark)
+- Password management
+- MFA setup and management
+- Session viewer with remote revocation
+- Account deletion with data cleanup
+- Data export (GDPR-friendly)
+- Billing management (plan selection, credit purchases, invoice history, PDF download)
+- Onboarding flow
+
+### Built-in API Documentation
+- Interactive HTML API reference at `/api/docs` with expandable endpoint details
+- Markdown API reference at `/api/docs/markdown` for integration in external docs
+- Comprehensive webhook event reference with payload descriptions
+- Auto-versioned from the VERSION file
 
 ### CLI Administration
 - `lastsaas setup` — Initialize the system (create root tenant + owner)
@@ -89,12 +183,26 @@ This is open-source infrastructure for the creator era of software — where the
 - `lastsaas version` — Show binary and database versions
 - `lastsaas status` — Check system health
 
+### Security
+- Security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy)
+- Rate limiting on authentication endpoints
+- Request body size limits
+- NoSQL injection protection (regex input escaping)
+- XSS protection via DOMPurify for injected HTML
+- Trusted proxy IP resolution (Fly-Client-IP)
+- Webhook signature verification (Stripe inbound, HMAC-SHA256 outbound)
+- Idempotent webhook processing via unique event ID index
+- System log injection detection with automatic critical alerts
+- Refresh token rotation with family-based revocation
+
 ### Production Ready
 - Dockerized multi-stage build (Go + Node + Alpine)
 - Fly.io deployment with auto-stop/auto-start machines
 - SPA serving from the Go binary (no separate web server needed)
 - CORS, security headers, rate limiting
 - Graceful shutdown with connection draining
+- Auto-versioning with database migration on startup
+- Version notification messages to admin users after upgrades
 
 ---
 
@@ -105,10 +213,13 @@ This is open-source infrastructure for the creator era of software — where the
 | Backend | Go 1.25, gorilla/mux |
 | Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4 |
 | Database | MongoDB (Atlas or local) |
-| Auth | JWT (access + refresh), bcrypt, Google OAuth |
+| Auth | JWT (access + refresh), bcrypt, Google/GitHub/Microsoft OAuth, Magic Links, TOTP MFA |
+| Billing | Stripe (stripe-go v82) — Checkout, Billing Portal, Webhooks, Tax |
 | Email | Resend |
 | Charts | Recharts |
 | Metrics | gopsutil v4 |
+| PDF | gofpdf (invoice generation) |
+| Security | DOMPurify (frontend), HMAC-SHA256 (webhooks) |
 | Deployment | Docker, Fly.io |
 
 ---
@@ -125,6 +236,9 @@ This is open-source infrastructure for the creator era of software — where the
 ### Optional
 - [Resend](https://resend.com) API key — for email verification, password resets, and invitations
 - Google OAuth credentials — for Google sign-in
+- GitHub OAuth credentials — for GitHub sign-in
+- Microsoft OAuth credentials — for Microsoft sign-in
+- [Stripe](https://stripe.com) account — for billing (subscriptions, credit purchases, invoices)
 - [Fly.io](https://fly.io) account — for production deployment
 
 ---
@@ -190,6 +304,68 @@ This creates the root tenant (your admin organization) and the owner account. Yo
 
 ---
 
+## Setting Up Stripe Billing
+
+Stripe integration is optional but required for paid subscriptions, credit bundle purchases, and invoice generation. If you skip this section, LastSaaS works as a free-tier-only platform.
+
+### 1. Create a Stripe account
+
+Sign up at [stripe.com](https://stripe.com) and complete onboarding. You can use **test mode** during development.
+
+### 2. Get your API keys
+
+Go to **Stripe Dashboard → Developers → API keys** and copy:
+- **Publishable key** (starts with `pk_test_` or `pk_live_`)
+- **Secret key** (starts with `sk_test_` or `sk_live_`)
+
+### 3. Create a webhook endpoint
+
+Go to **Stripe Dashboard → Developers → Webhooks → Add endpoint**:
+
+- **Endpoint URL**: `https://your-domain.com/api/billing/webhook`
+  - For local development with the Stripe CLI: `stripe listen --forward-to localhost:4290/api/billing/webhook`
+- **Events to subscribe to** — select these 8 events:
+  - `checkout.session.completed`
+  - `invoice.paid`
+  - `invoice.payment_failed`
+  - `customer.subscription.updated`
+  - `customer.subscription.deleted`
+  - `charge.refunded`
+  - `charge.dispute.created`
+  - `charge.dispute.closed`
+
+After creating the endpoint, copy the **Signing secret** (starts with `whsec_`).
+
+### 4. Set environment variables
+
+Add these to your `.env` file:
+
+```bash
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_PUBLISHABLE_KEY=pk_test_...
+STRIPE_WEBHOOK_SECRET=whsec_...
+```
+
+### 5. Create plans in the admin UI
+
+Once the backend is running with Stripe configured:
+1. Log in as the root tenant owner
+2. Go to **Admin → Plans** and create your subscription plans
+3. Set pricing, billing intervals, trial days, entitlements, and credit allocations
+4. Optionally create **credit bundles** under Admin → Credit Bundles
+5. Optionally create **promotion codes** under Admin → Promotions
+
+Stripe Products and Prices are created automatically when customers check out — you don't need to configure anything in the Stripe Dashboard beyond the API keys and webhook.
+
+### 6. Go live
+
+When you're ready for production:
+1. Switch to **live mode** in the Stripe Dashboard
+2. Create a new webhook endpoint with your production URL and the same 8 events
+3. Update your production environment variables with the live keys and webhook secret
+
+---
+
 ## Configuration
 
 Config files live in `backend/config/`:
@@ -200,19 +376,25 @@ Set `LASTSAAS_ENV=dev` or `LASTSAAS_ENV=prod` to select which config to load. De
 
 Secrets are referenced as `${ENV_VAR}` in YAML and expanded from environment variables at load time. Default values use `${VAR:default}` syntax.
 
-### Key Configuration
+### Environment Variables
 
-| Variable | Description |
-|----------|------------|
-| `DATABASE_NAME` | Project identity — shared name = shared user base |
-| `MONGODB_URI` | MongoDB connection string |
-| `JWT_ACCESS_SECRET` | Secret for signing access tokens |
-| `JWT_REFRESH_SECRET` | Secret for signing refresh tokens |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID (optional) |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth secret (optional) |
-| `RESEND_API_KEY` | Resend email service key (optional) |
-| `APP_NAME` | Your application name (used in emails, UI) |
-| `FRONTEND_URL` | Frontend URL for CORS and email links |
+| Variable | Required | Description |
+|----------|----------|------------|
+| `DATABASE_NAME` | Yes | Project identity — shared name = shared user base |
+| `MONGODB_URI` | Yes | MongoDB connection string |
+| `JWT_ACCESS_SECRET` | Yes | Secret for signing access tokens |
+| `JWT_REFRESH_SECRET` | Yes | Secret for signing refresh tokens |
+| `FRONTEND_URL` | Yes | Frontend URL for CORS and email links |
+| `APP_NAME` | Yes | Your application name (used in emails, UI) |
+| `STRIPE_SECRET_KEY` | No | Stripe secret API key |
+| `STRIPE_PUBLISHABLE_KEY` | No | Stripe publishable key (sent to frontend) |
+| `STRIPE_WEBHOOK_SECRET` | No | Stripe webhook signing secret |
+| `GOOGLE_CLIENT_ID` | No | Google OAuth client ID |
+| `GOOGLE_CLIENT_SECRET` | No | Google OAuth secret |
+| `GOOGLE_REDIRECT_URL` | No | Google OAuth redirect URL |
+| `RESEND_API_KEY` | No | Resend email service API key |
+| `FROM_EMAIL` | No | Sender email address (default: noreply@yourdomain.com) |
+| `FROM_NAME` | No | Sender name (default: LastSaaS) |
 
 ---
 
@@ -222,40 +404,55 @@ Secrets are referenced as `${ENV_VAR}` in YAML and expanded from environment var
 lastsaas/
   backend/
     cmd/
-      server/main.go              Entry point (HTTP server)
-      lastsaas/main.go             CLI administration tool
-    config/                        YAML config files
+      server/main.go              Entry point (HTTP server, route wiring)
+      lastsaas/main.go            CLI administration tool
+    config/                       YAML config files
     internal/
-      api/handlers/                HTTP handlers (auth, admin, tenant, health, etc.)
-      auth/                        JWT, password hashing, Google OAuth
-      config/                      Config loader with env expansion
-      configstore/                 Runtime configuration (DB-backed, cached)
-      db/                          MongoDB connection, collections, indexes
-      email/                       Resend email service with templates
-      events/                      Event emitter interface
-      health/                      System health monitoring service
-      middleware/                   Auth, tenant, RBAC, rate limiting, metrics, security
-      models/                      All data models
-      planstore/                   Plan seeding
-      syslog/                      System logging service
-      version/                     Version management and migration
+      api/handlers/               HTTP handlers (auth, admin, tenant, billing, branding, webhooks, etc.)
+      apicounter/                  API call counters for integration health
+      auth/                       JWT, password hashing, Google/GitHub/Microsoft OAuth, TOTP MFA
+      config/                     Config loader with env variable expansion
+      configstore/                Runtime configuration (DB-backed, cached)
+      db/                         MongoDB connection, collections, indexes
+      email/                      Resend email service with templates
+      events/                     Internal event emitter (drives webhook deliveries)
+      health/                     System health monitoring service
+      middleware/                  Auth, tenant, RBAC, rate limiting, metrics, security, billing enforcement
+      models/                     All data models
+      planstore/                  Plan seeding
+      stripe/                     Stripe service (Checkout, Billing Portal, Customers, Prices, Subscriptions)
+      syslog/                     System logging service with injection detection
+      version/                    Version management and auto-migration
   frontend/
     src/
-      api/client.ts                Axios API client
-      components/                  Layout, AdminLayout, shared components
-      contexts/                    Auth and Tenant React contexts
+      api/client.ts               Axios API client with token refresh
+      components/                 Layout, AdminLayout, BrandingThemeInjector, shared components
+      contexts/                   Auth, Tenant, and Branding React contexts
       pages/
-        admin/                     Admin interface pages
-        admin/health/              Health monitoring components and charts
-        app/                       Customer-facing pages
-        auth/                      Login, signup, verification, password reset
-      types/index.ts               TypeScript type definitions
+        admin/                    Admin interface (dashboard, users, tenants, plans, billing, branding, etc.)
+        admin/health/             Health monitoring components and charts
+        app/                      Customer-facing pages (dashboard, billing, team, settings, activity)
+        app/settings/             User settings tabs (profile, security, MFA, sessions, billing)
+        auth/                     Login, signup, MFA challenge, magic link, verification, password reset
+        public/                   Landing page and custom pages
+      types/index.ts              TypeScript type definitions
   scripts/
-    setup.sh                       Interactive setup script
-  Dockerfile                       Multi-stage production build
-  fly.toml                         Fly.io deployment config
-  VERSION                          Current version number
+    setup.sh                      Interactive setup script
+  Dockerfile                      Multi-stage production build
+  fly.toml                        Fly.io deployment config
+  VERSION                         Current version number
 ```
+
+---
+
+## API Documentation
+
+LastSaaS includes built-in, self-hosted API documentation:
+
+- **Interactive HTML reference**: `GET /api/docs` — expandable endpoint cards with request/response examples
+- **Markdown reference**: `GET /api/docs/markdown` — for embedding in external documentation
+
+The documentation is generated from code and always matches the running version. It covers all endpoints, parameters, request/response formats, and all 19 webhook event types with payload descriptions.
 
 ---
 
@@ -279,7 +476,10 @@ flyctl secrets set \
   JWT_ACCESS_SECRET="$(openssl rand -hex 32)" \
   JWT_REFRESH_SECRET="$(openssl rand -hex 32)" \
   FRONTEND_URL="https://your-app-name.fly.dev" \
-  APP_NAME="YourApp"
+  APP_NAME="YourApp" \
+  STRIPE_SECRET_KEY="sk_live_..." \
+  STRIPE_PUBLISHABLE_KEY="pk_live_..." \
+  STRIPE_WEBHOOK_SECRET="whsec_..."
 
 # Deploy
 flyctl deploy
@@ -293,45 +493,6 @@ The Docker image works anywhere containers run. The only external dependency is 
 
 ---
 
-## API Routes
-
-| Method | Path | Auth | Description |
-|--------|------|------|-------------|
-| GET | `/api/bootstrap/status` | No | Check if system is initialized |
-| POST | `/api/auth/register` | No | Create account |
-| POST | `/api/auth/login` | No | Login |
-| POST | `/api/auth/refresh` | No | Refresh tokens |
-| POST | `/api/auth/verify-email` | No | Verify email address |
-| POST | `/api/auth/forgot-password` | No | Request password reset |
-| POST | `/api/auth/reset-password` | No | Reset password with token |
-| GET | `/api/auth/google` | No | Start Google OAuth |
-| GET | `/api/auth/me` | JWT | Current user + memberships |
-| POST | `/api/auth/logout` | JWT | Logout |
-| POST | `/api/auth/change-password` | JWT | Change password |
-| POST | `/api/auth/accept-invitation` | JWT | Accept team invitation |
-| GET | `/api/tenant/members` | JWT+Tenant | List team members |
-| POST | `/api/tenant/members/invite` | JWT+Admin | Invite member |
-| DELETE | `/api/tenant/members/{id}` | JWT+Admin | Remove member |
-| PATCH | `/api/tenant/members/{id}/role` | JWT+Owner | Change member role |
-| POST | `/api/tenant/members/{id}/transfer-ownership` | JWT+Owner | Transfer ownership |
-| GET | `/api/messages` | JWT | List messages |
-| GET | `/api/messages/unread-count` | JWT | Unread message count |
-| PATCH | `/api/messages/{id}/read` | JWT | Mark message as read |
-| GET | `/api/plans` | JWT | List plans (public) |
-| GET | `/api/credit-bundles` | JWT | List credit bundles (public) |
-| GET | `/api/admin/about` | JWT+Root+Admin | System info |
-| GET | `/api/admin/logs` | JWT+Root+Admin | System logs |
-| GET/POST | `/api/admin/config` | JWT+Root+Admin | Configuration management |
-| GET | `/api/admin/tenants` | JWT+Root+Admin | List tenants |
-| GET | `/api/admin/plans` | JWT+Root+Admin | List plans |
-| GET | `/api/admin/health/*` | JWT+Root+Admin | Health monitoring |
-| GET | `/api/admin/users` | JWT+Root+Owner | User management |
-| PUT/DELETE | `/api/admin/users/{id}` | JWT+Root+Owner | Modify users |
-| POST/PUT/DELETE | `/api/admin/plans/*` | JWT+Root+Owner | Manage plans |
-| PATCH | `/api/admin/tenants/{id}/plan` | JWT+Root+Owner | Assign plans |
-
----
-
 ## Extending LastSaaS
 
 LastSaaS is designed to be a starting point. Fork it and build your product on top:
@@ -342,7 +503,11 @@ LastSaaS is designed to be a starting point. Fork it and build your product on t
 4. **Add frontend pages** in `frontend/src/pages/`
 5. **Use the tenant context** — every authenticated request carries the user's tenant, so your product logic gets multi-tenancy for free
 6. **Use the credit system** — check and deduct credits for usage-based features
-7. **Use the config store** — add runtime-configurable settings without redeployment
+7. **Use entitlements** — gate features with `middleware.RequireEntitlement(db, "feature_name")` and `middleware.RequireActiveBilling()`
+8. **Use the config store** — add runtime-configurable settings without redeployment
+9. **Use the event emitter** — emit events from your handlers and they'll automatically be delivered to configured webhooks
+10. **Use API keys** — your endpoints automatically support both JWT and API key authentication
+11. **Use the branding system** — your UI inherits the white-label theme automatically via the BrandingContext
 
 The entire codebase was built conversationally with Claude Code. You can keep building it the same way — describe what you want, and let the agent implement it on top of the existing patterns.
 
