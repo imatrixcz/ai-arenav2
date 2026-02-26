@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
+import DOMPurify from 'dompurify';
 import { useBranding } from '../contexts/BrandingContext';
 
 // Generates a full shade palette from a single hex color.
@@ -121,7 +122,7 @@ export default function BrandingThemeInjector() {
       el.style.display = 'none';
       document.head.appendChild(el);
     }
-    el.innerHTML = snippet;
+    el.innerHTML = DOMPurify.sanitize(snippet, { ADD_TAGS: ['script'], ADD_ATTR: ['async', 'defer', 'src'] });
 
     return () => {
       const existing = document.getElementById(id);
@@ -164,7 +165,7 @@ export default function BrandingThemeInjector() {
       el.style.display = 'none';
       document.head.appendChild(el);
     }
-    el.innerHTML = html;
+    el.innerHTML = DOMPurify.sanitize(html, { ADD_TAGS: ['script', 'link', 'meta'], ADD_ATTR: ['async', 'defer', 'src', 'href', 'rel', 'content', 'property'] });
 
     return () => {
       const existing = document.getElementById(id);

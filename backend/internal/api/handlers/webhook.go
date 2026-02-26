@@ -100,6 +100,12 @@ func (h *WebhookHandler) HandleWebhook(w http.ResponseWriter, r *http.Request) {
 		processingErr = h.handleSubscriptionUpdated(ctx, event)
 	case "customer.subscription.deleted":
 		processingErr = h.handleSubscriptionDeleted(ctx, event)
+	case "charge.refunded":
+		processingErr = h.handleChargeRefunded(ctx, event)
+	case "charge.dispute.created":
+		processingErr = h.handleDisputeCreated(ctx, event)
+	case "charge.dispute.closed":
+		processingErr = h.handleDisputeClosed(ctx, event)
 	default:
 		log.Printf("Webhook: unhandled event type %s", event.Type)
 	}
@@ -166,24 +172,26 @@ func (h *WebhookHandler) handleCheckoutCompleted(ctx context.Context, event stri
 		if periodEnd != nil {
 			updates["currentPeriodEnd"] = periodEnd
 		}
+		// Mark trial as used so tenant can't get another free trial
+		if session.Subscription != nil && session.Subscription.TrialEnd > 0 {
+			now := time.Now()
+			updates["trialUsedAt"] = &now
+		}
 		// Store seat quantity for per-seat plans
 		if seatQtyStr := session.Metadata["seatQuantity"]; seatQtyStr != "" {
 			if seatQty, err := strconv.Atoi(seatQtyStr); err == nil && seatQty > 0 {
 				updates["seatQuantity"] = seatQty
 			}
 		}
-		if _, err := h.db.Tenants().UpdateOne(ctx, bson.M{"_id": tenantID}, bson.M{"$set": updates}); err != nil {
+		// Set subscription credits from plan (combined into single update)
+		updates["subscriptionCredits"] = plan.UsageCreditsPerMonth
+		updateOp := bson.M{"$set": updates}
+		if plan.BonusCredits > 0 {
+			updateOp["$inc"] = bson.M{"purchasedCredits": plan.BonusCredits}
+		}
+		if _, err := h.db.Tenants().UpdateOne(ctx, bson.M{"_id": tenantID}, updateOp); err != nil {
 			log.Printf("Webhook: failed to update tenant %s: %v", tenantID.Hex(), err)
 			return fmt.Errorf("update tenant: %w", err)
-		}
-
-		// Set subscription credits from plan
-		if _, err := h.db.Tenants().UpdateOne(ctx, bson.M{"_id": tenantID}, bson.M{
-			"$set": bson.M{"subscriptionCredits": plan.UsageCreditsPerMonth},
-			"$inc": bson.M{"purchasedCredits": plan.BonusCredits},
-		}); err != nil {
-			log.Printf("Webhook: failed to set credits for tenant %s: %v", tenantID.Hex(), err)
-			return fmt.Errorf("set credits: %w", err)
 		}
 
 		// Record transaction with tax breakdown
@@ -561,6 +569,141 @@ func (h *WebhookHandler) handleSubscriptionDeleted(ctx context.Context, event st
 			"planName": "Free",
 		},
 	})
+	return nil
+}
+
+func (h *WebhookHandler) handleChargeRefunded(ctx context.Context, event stripe.Event) error {
+	var charge stripe.Charge
+	if err := json.Unmarshal(event.Data.Raw, &charge); err != nil {
+		log.Printf("Webhook: failed to unmarshal charge: %v", err)
+		return fmt.Errorf("unmarshal charge: %w", err)
+	}
+
+	// Find tenant by Stripe customer ID
+	if charge.Customer == nil {
+		return nil
+	}
+	var tenant models.Tenant
+	if err := h.db.Tenants().FindOne(ctx, bson.M{"stripeCustomerId": charge.Customer.ID}).Decode(&tenant); err != nil {
+		log.Printf("Webhook: tenant not found for customer %s on refund", charge.Customer.ID)
+		return nil // Not an error — may belong to another instance
+	}
+
+	refundedAmount := charge.AmountRefunded
+
+	h.syslog.High(ctx, fmt.Sprintf("Refund received: tenant %s (%s), amount $%.2f",
+		tenant.ID.Hex(), tenant.Name, float64(refundedAmount)/100))
+
+	// Record refund transaction
+	var ownerMembership models.TenantMembership
+	h.db.TenantMemberships().FindOne(ctx, bson.M{"tenantId": tenant.ID, "role": models.RoleOwner}).Decode(&ownerMembership)
+
+	h.recordTransaction(ctx, tenant.ID, ownerMembership.UserID, models.TransactionRefund, -refundedAmount, -refundedAmount, 0, "Refund", "", nil, nil, "", "")
+
+	h.events.Emit(events.Event{
+		Type:      "billing.refund_received",
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tenantId":    tenant.ID.Hex(),
+			"tenantName":  tenant.Name,
+			"amountCents": refundedAmount,
+		},
+	})
+
+	return nil
+}
+
+func (h *WebhookHandler) handleDisputeCreated(ctx context.Context, event stripe.Event) error {
+	var dispute stripe.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		log.Printf("Webhook: failed to unmarshal dispute: %v", err)
+		return fmt.Errorf("unmarshal dispute: %w", err)
+	}
+
+	// Find tenant by charge's customer
+	customerID := ""
+	if dispute.Charge != nil && dispute.Charge.Customer != nil {
+		customerID = dispute.Charge.Customer.ID
+	}
+	if customerID == "" {
+		return nil
+	}
+
+	var tenant models.Tenant
+	if err := h.db.Tenants().FindOne(ctx, bson.M{"stripeCustomerId": customerID}).Decode(&tenant); err != nil {
+		log.Printf("Webhook: tenant not found for customer %s on dispute", customerID)
+		return nil
+	}
+
+	// Set billing status to past_due to restrict access during dispute
+	if _, err := h.db.Tenants().UpdateOne(ctx, bson.M{"_id": tenant.ID}, bson.M{
+		"$set": bson.M{"billingStatus": models.BillingStatusPastDue, "updatedAt": time.Now()},
+	}); err != nil {
+		log.Printf("Webhook: failed to set past_due for tenant %s on dispute: %v", tenant.ID.Hex(), err)
+	}
+
+	h.syslog.Critical(ctx, fmt.Sprintf("Payment dispute opened: tenant %s (%s), amount $%.2f, reason: %s",
+		tenant.ID.Hex(), tenant.Name, float64(dispute.Amount)/100, dispute.Reason))
+
+	h.events.Emit(events.Event{
+		Type:      "billing.dispute_created",
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tenantId":    tenant.ID.Hex(),
+			"tenantName":  tenant.Name,
+			"amountCents": dispute.Amount,
+			"reason":      string(dispute.Reason),
+		},
+	})
+
+	return nil
+}
+
+func (h *WebhookHandler) handleDisputeClosed(ctx context.Context, event stripe.Event) error {
+	var dispute stripe.Dispute
+	if err := json.Unmarshal(event.Data.Raw, &dispute); err != nil {
+		log.Printf("Webhook: failed to unmarshal dispute: %v", err)
+		return fmt.Errorf("unmarshal dispute: %w", err)
+	}
+
+	customerID := ""
+	if dispute.Charge != nil && dispute.Charge.Customer != nil {
+		customerID = dispute.Charge.Customer.ID
+	}
+	if customerID == "" {
+		return nil
+	}
+
+	var tenant models.Tenant
+	if err := h.db.Tenants().FindOne(ctx, bson.M{"stripeCustomerId": customerID}).Decode(&tenant); err != nil {
+		return nil
+	}
+
+	won := dispute.Status == "won"
+	if won {
+		// Dispute resolved in our favor — restore active billing if subscription is still active
+		if tenant.StripeSubscriptionID != "" {
+			h.db.Tenants().UpdateOne(ctx, bson.M{"_id": tenant.ID}, bson.M{
+				"$set": bson.M{"billingStatus": models.BillingStatusActive, "updatedAt": time.Now()},
+			})
+		}
+		h.syslog.High(ctx, fmt.Sprintf("Payment dispute won: tenant %s (%s)", tenant.ID.Hex(), tenant.Name))
+	} else {
+		h.syslog.High(ctx, fmt.Sprintf("Payment dispute lost: tenant %s (%s), status: %s",
+			tenant.ID.Hex(), tenant.Name, dispute.Status))
+	}
+
+	h.events.Emit(events.Event{
+		Type:      "billing.dispute_closed",
+		Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tenantId":   tenant.ID.Hex(),
+			"tenantName": tenant.Name,
+			"status":     string(dispute.Status),
+			"won":        won,
+		},
+	})
+
 	return nil
 }
 

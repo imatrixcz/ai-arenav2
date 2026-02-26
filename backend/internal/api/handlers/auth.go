@@ -734,6 +734,12 @@ func (h *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
 
 	h.db.Users().UpdateOne(r.Context(), bson.M{"_id": user.ID}, update)
 
+	// Revoke all active sessions so stolen tokens can't persist after password change
+	h.db.RefreshTokens().UpdateMany(r.Context(),
+		bson.M{"userId": user.ID, "isRevoked": false},
+		bson.M{"$set": bson.M{"isRevoked": true}},
+	)
+
 	h.syslog.High(r.Context(), fmt.Sprintf("Password changed by user %s (%s)", user.Email, user.ID.Hex()))
 
 	respondWithJSON(w, http.StatusOK, map[string]string{"message": "Password changed successfully"})

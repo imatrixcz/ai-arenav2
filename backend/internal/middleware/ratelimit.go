@@ -202,28 +202,12 @@ func (rl *RateLimiter) allowLocal(key string, config RateLimitConfig) (bool, int
 }
 
 func GetClientIP(r *http.Request) string {
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		if ip, _, err := net.SplitHostPort(xff); err == nil {
-			return ip
+	// Fly-Client-IP is set by the Fly.io proxy and cannot be spoofed by clients.
+	// Prefer this over X-Forwarded-For which clients can forge.
+	if flyIP := r.Header.Get("Fly-Client-IP"); flyIP != "" {
+		if net.ParseIP(flyIP) != nil {
+			return flyIP
 		}
-		if net.ParseIP(xff) != nil {
-			return xff
-		}
-		for i := 0; i < len(xff); i++ {
-			if xff[i] == ',' {
-				firstIP := xff[:i]
-				if net.ParseIP(firstIP) != nil {
-					return firstIP
-				}
-				break
-			}
-		}
-	}
-
-	xri := r.Header.Get("X-Real-IP")
-	if xri != "" && net.ParseIP(xri) != nil {
-		return xri
 	}
 
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)

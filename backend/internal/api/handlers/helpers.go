@@ -33,3 +33,12 @@ var emailRegex = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 func isValidEmail(email string) bool {
 	return emailRegex.MatchString(email)
 }
+
+var regexMetaReplacer = regexp.MustCompile(`[.*+?^${}()|[\]\\]`)
+
+// escapeRegexInput escapes special regex characters in user input for safe use in MongoDB $regex queries.
+func escapeRegexInput(s string) string {
+	return regexMetaReplacer.ReplaceAllStringFunc(s, func(c string) string {
+		return `\` + c
+	})
+}

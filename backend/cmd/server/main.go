@@ -476,10 +476,11 @@ func main() {
 	// Public announcements route (require JWT)
 	guarded.Handle("/announcements", authMiddleware.RequireAuth(http.HandlerFunc(announcementsHandler.ListPublic))).Methods("GET")
 
-	// Usage metering routes (require JWT + tenant)
+	// Usage metering routes (require JWT + tenant + active billing)
 	usageAPI := guarded.PathPrefix("/usage").Subrouter()
 	usageAPI.Use(authMiddleware.RequireAuth)
 	usageAPI.Use(tenantMiddleware.RequireTenant)
+	usageAPI.Use(middleware.RequireActiveBilling())
 	usageAPI.HandleFunc("/record", rateLimiter.RateLimitHandler(
 		middleware.UsageRecordLimit,
 		func(r *http.Request) string { return "usage:" + middleware.GetClientIP(r) },

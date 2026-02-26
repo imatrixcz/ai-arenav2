@@ -92,6 +92,12 @@ func (h *BillingHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// Prevent trial abuse: skip trial if this tenant already used one
+		trialDays := plan.TrialDays
+		if tenant.TrialUsedAt != nil {
+			trialDays = 0
+		}
+
 		if req.BillingInterval == "" {
 			req.BillingInterval = "year"
 		}
@@ -171,7 +177,7 @@ func (h *BillingHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 				TenantID:        tenant.ID.Hex(),
 				UserID:          user.ID.Hex(),
 				SeatQuantity:    int64(seats),
-				TrialDays:       plan.TrialDays,
+				TrialDays:       trialDays,
 				Currency:        currency,
 				AutomaticTax:    automaticTax,
 			}
@@ -263,7 +269,7 @@ func (h *BillingHandler) Checkout(w http.ResponseWriter, r *http.Request) {
 			BillingInterval: req.BillingInterval,
 			TenantID:        tenant.ID.Hex(),
 			UserID:          user.ID.Hex(),
-			TrialDays:       plan.TrialDays,
+			TrialDays:       trialDays,
 			Currency:        currency,
 			AutomaticTax:    automaticTax,
 		})
@@ -671,11 +677,12 @@ func (h *BillingHandler) AdminListTransactions(w http.ResponseWriter, r *http.Re
 		}
 	}
 	if search := q.Get("search"); search != "" {
+		escaped := escapeRegexInput(search)
 		filter["$or"] = []bson.M{
-			{"description": bson.M{"$regex": search, "$options": "i"}},
-			{"invoiceNumber": bson.M{"$regex": search, "$options": "i"}},
-			{"planName": bson.M{"$regex": search, "$options": "i"}},
-			{"bundleName": bson.M{"$regex": search, "$options": "i"}},
+			{"description": bson.M{"$regex": escaped, "$options": "i"}},
+			{"invoiceNumber": bson.M{"$regex": escaped, "$options": "i"}},
+			{"planName": bson.M{"$regex": escaped, "$options": "i"}},
+			{"bundleName": bson.M{"$regex": escaped, "$options": "i"}},
 		}
 	}
 

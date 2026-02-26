@@ -521,10 +521,10 @@ func (h *TenantHandler) GetActivity(w http.ResponseWriter, r *http.Request) {
 
 	filter := bson.M{"tenantId": tenant.ID}
 	if action := r.URL.Query().Get("action"); action != "" {
-		filter["action"] = bson.M{"$regex": action, "$options": "i"}
+		filter["action"] = bson.M{"$regex": escapeRegexInput(action), "$options": "i"}
 	}
 	if search := r.URL.Query().Get("search"); search != "" {
-		filter["message"] = bson.M{"$regex": search, "$options": "i"}
+		filter["message"] = bson.M{"$regex": escapeRegexInput(search), "$options": "i"}
 	}
 
 	skip := int64((page - 1) * limit)
