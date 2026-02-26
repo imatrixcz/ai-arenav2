@@ -4,7 +4,7 @@ project_name: lastsaas
 
 before:
   hooks:
-    - go mod tidy
+    - cd backend && go mod tidy
 
 builds:
   - id: lastsaas
