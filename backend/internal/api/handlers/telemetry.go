@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,6 +13,41 @@ import (
 
 	"go.mongodb.org/mongo-driver/bson/primitive"
 )
+
+const (
+	maxEventNameLen    = 128
+	maxSessionIDLen    = 128
+	maxPropertiesCount = 50
+)
+
+// validEventName allows alphanumeric, dots, underscores, and hyphens.
+var validEventName = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
+
+// validSessionID allows alphanumeric, hyphens, and underscores (UUIDs, nanoids, etc.).
+var validSessionID = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+// sanitizeProperties caps the number of top-level keys and truncates long string values.
+func sanitizeProperties(props map[string]interface{}) map[string]interface{} {
+	if props == nil {
+		return nil
+	}
+	out := make(map[string]interface{}, len(props))
+	count := 0
+	for k, v := range props {
+		if count >= maxPropertiesCount {
+			break
+		}
+		if len(k) > 128 {
+			k = k[:128]
+		}
+		if s, ok := v.(string); ok && len(s) > 1024 {
+			v = s[:1024]
+		}
+		out[k] = v
+		count++
+	}
+	return out
+}
 
 type TelemetryHandler struct {
 	telemetry *telemetry.Service
@@ -39,6 +75,11 @@ func (h *TelemetryHandler) TrackAnonymous(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if len(req.SessionID) > maxSessionIDLen || !validSessionID.MatchString(req.SessionID) {
+		respondWithError(w, http.StatusBadRequest, "Invalid sessionId format")
+		return
+	}
+
 	// Only allow page.view for anonymous tracking
 	if req.Event != models.TelemetryPageView {
 		respondWithError(w, http.StatusBadRequest, "Anonymous tracking only supports page.view events")
@@ -49,7 +90,7 @@ func (h *TelemetryHandler) TrackAnonymous(w http.ResponseWriter, r *http.Request
 		EventName:  req.Event,
 		Category:   models.TelemetryCategoryFunnel,
 		SessionID:  req.SessionID,
-		Properties: req.Properties,
+		Properties: sanitizeProperties(req.Properties),
 		CreatedAt:  time.Now(),
 	}
 
@@ -85,6 +126,11 @@ func (h *TelemetryHandler) TrackAuthenticated(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	if len(req.Event) > maxEventNameLen || !validEventName.MatchString(req.Event) {
+		respondWithError(w, http.StatusBadRequest, "Invalid event name: use alphanumeric, dots, underscores, hyphens (max 128 chars)")
+		return
+	}
+
 	// Custom events must use "custom." prefix
 	if !strings.HasPrefix(req.Event, "custom.") {
 		respondWithError(w, http.StatusBadRequest, "Custom events must use 'custom.' prefix")
@@ -95,7 +141,7 @@ func (h *TelemetryHandler) TrackAuthenticated(w http.ResponseWriter, r *http.Req
 		EventName:  req.Event,
 		Category:   models.TelemetryCategoryCustom,
 		UserID:     &user.ID,
-		Properties: req.Properties,
+		Properties: sanitizeProperties(req.Properties),
 		CreatedAt:  time.Now(),
 	}
 	if tenant != nil {
@@ -146,6 +192,9 @@ func (h *TelemetryHandler) TrackBatch(w http.ResponseWriter, r *http.Request) {
 		if e.Event == "" {
 			continue
 		}
+		if len(e.Event) > maxEventNameLen || !validEventName.MatchString(e.Event) {
+			continue
+		}
 		if !strings.HasPrefix(e.Event, "custom.") {
 			continue
 		}
@@ -154,7 +203,7 @@ func (h *TelemetryHandler) TrackBatch(w http.ResponseWriter, r *http.Request) {
 			EventName:  e.Event,
 			Category:   models.TelemetryCategoryCustom,
 			UserID:     &user.ID,
-			Properties: e.Properties,
+			Properties: sanitizeProperties(e.Properties),
 			CreatedAt:  now,
 		}
 		if tenant != nil {

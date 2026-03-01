@@ -46,7 +46,28 @@ export default function PromotionsPage() {
     }
   }, []);
 
-  useEffect(() => { fetchPromotions(); }, [fetchPromotions]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadData = async () => {
+      try {
+        const data = await adminApi.listPromotions();
+        if (!controller.signal.aborted) {
+          setPromotions(data.promotions);
+          setProductNames(data.productNames || {});
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          toast.error(getErrorMessage(err));
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+    loadData();
+    return () => controller.abort();
+  }, []);
 
   const handleDeactivate = async () => {
     if (!deactivateTarget) return;

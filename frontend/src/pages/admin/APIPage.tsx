@@ -237,7 +237,25 @@ function APIKeysSection({ canWrite }: { canWrite: boolean }) {
     }
   }, []);
 
-  useEffect(() => { fetchKeys(); }, [fetchKeys]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadData = async () => {
+      try {
+        const data = await adminApi.listAPIKeys();
+        if (!controller.signal.aborted) {
+          setKeys(data.apiKeys);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+    loadData();
+    return () => controller.abort();
+  }, []);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;
@@ -669,7 +687,26 @@ function WebhookDetailModal({ webhookId, onClose, onRefresh, canWrite }: {
     }
   }, [webhookId]);
 
-  useEffect(() => { fetchDetail(); }, [fetchDetail]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadData = async () => {
+      try {
+        const data = await adminApi.getWebhook(webhookId);
+        if (!controller.signal.aborted) {
+          setHook(data.webhook);
+          setDeliveries(data.deliveries);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+    loadData();
+    return () => controller.abort();
+  }, [webhookId]);
 
   const handleTest = async () => {
     if (!hook) return;
@@ -916,7 +953,25 @@ function WebhooksSection({ canWrite }: { canWrite: boolean }) {
     }
   }, []);
 
-  useEffect(() => { fetchHooks(); }, [fetchHooks]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadData = async () => {
+      try {
+        const data = await adminApi.listWebhooks();
+        if (!controller.signal.aborted) {
+          setHooks(data.webhooks);
+        }
+      } catch {
+        // ignore
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+    loadData();
+    return () => controller.abort();
+  }, []);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;

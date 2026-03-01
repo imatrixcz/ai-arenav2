@@ -163,32 +163,38 @@ func (s *Service) collectDaily() {
 	now := time.Now().UTC()
 	dateStr := now.Format("2006-01-02")
 
-	// DAU + MAU in a single aggregation pipeline
+	// DAU + WAU + MAU in a single aggregation pipeline
 	dayAgo := now.Add(-24 * time.Hour)
+	weekAgo := now.AddDate(0, 0, -7)
 	monthAgo := now.AddDate(0, 0, -30)
 
-	dauMauPipeline := bson.A{
+	dauWauMauPipeline := bson.A{
 		bson.M{"$match": bson.M{"lastLoginAt": bson.M{"$gte": monthAgo}}},
 		bson.M{"$group": bson.M{
 			"_id": nil,
 			"mau": bson.M{"$sum": 1},
+			"wau": bson.M{"$sum": bson.M{"$cond": bson.A{
+				bson.M{"$gte": bson.A{"$lastLoginAt", weekAgo}}, 1, 0,
+			}}},
 			"dau": bson.M{"$sum": bson.M{"$cond": bson.A{
 				bson.M{"$gte": bson.A{"$lastLoginAt", dayAgo}}, 1, 0,
 			}}},
 		}},
 	}
-	var dauCount, mauCount int64
-	dauMauCursor, err := s.db.Users().Aggregate(ctx, dauMauPipeline)
+	var dauCount, wauCount, mauCount int64
+	dauWauMauCursor, err := s.db.Users().Aggregate(ctx, dauWauMauPipeline)
 	if err != nil {
-		slog.Error("Metrics DAU/MAU aggregation error", "error", err)
+		slog.Error("Metrics DAU/WAU/MAU aggregation error", "error", err)
 	} else {
-		defer dauMauCursor.Close(ctx)
+		defer dauWauMauCursor.Close(ctx)
 		var results []struct {
 			DAU int64 `bson:"dau"`
+			WAU int64 `bson:"wau"`
 			MAU int64 `bson:"mau"`
 		}
-		if dauMauCursor.All(ctx, &results) == nil && len(results) > 0 {
+		if dauWauMauCursor.All(ctx, &results) == nil && len(results) > 0 {
 			dauCount = results[0].DAU
+			wauCount = results[0].WAU
 			mauCount = results[0].MAU
 		}
 	}
@@ -253,6 +259,7 @@ func (s *Service) collectDaily() {
 		bson.M{"date": dateStr},
 		bson.M{"$set": bson.M{
 			"dau":       dauCount,
+			"wau":       wauCount,
 			"mau":       mauCount,
 			"revenue":   revenue,
 			"arr":       arr,

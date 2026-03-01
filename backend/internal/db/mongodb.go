@@ -73,6 +73,9 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "slug", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "isRoot", Value: 1}}},
 				{Keys: bson.D{{Key: "name", Value: 1}}},
+				{Keys: bson.D{{Key: "billingStatus", Value: 1}, {Key: "isActive", Value: 1}}},
+				{Keys: bson.D{{Key: "planId", Value: 1}}},
+				{Keys: bson.D{{Key: "trialUsedAt", Value: 1}}, Options: options.Index().SetSparse(true)},
 			},
 		},
 		{
@@ -204,6 +207,7 @@ func (m *MongoDB) ensureIndexes() {
 			[]mongo.IndexModel{
 				{Keys: bson.D{{Key: "machineId", Value: 1}}, Options: options.Index().SetUnique(true)},
 				{Keys: bson.D{{Key: "lastSeen", Value: 1}}},
+				{Keys: bson.D{{Key: "startedAt", Value: 1}}},
 			},
 		},
 		{
@@ -289,6 +293,7 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "userId", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "sessionId", Value: 1}, {Key: "createdAt", Value: -1}}},
 				{Keys: bson.D{{Key: "createdAt", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(365 * 24 * 3600)}, // TTL: 365 days
+				{Keys: bson.D{{Key: "properties.page", Value: 1}, {Key: "createdAt", Value: -1}}, Options: options.Index().SetSparse(true)},
 			},
 		},
 	}

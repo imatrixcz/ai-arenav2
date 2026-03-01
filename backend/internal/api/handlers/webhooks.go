@@ -40,7 +40,7 @@ func NewWebhooksHandler(database *db.MongoDB, sysLogger *syslog.Logger, dispatch
 // ListWebhooks handles GET /api/admin/webhooks
 func (h *WebhooksHandler) ListWebhooks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
+	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100)
 	cursor, err := h.db.Webhooks().Find(ctx, bson.M{"isActive": true}, opts)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to list webhooks")

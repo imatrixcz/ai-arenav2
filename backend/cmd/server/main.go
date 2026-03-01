@@ -280,6 +280,7 @@ func main() {
 
 	// Initialize telemetry service
 	telemetrySvc := telemetry.New(database)
+	defer telemetrySvc.Stop()
 
 	// Initialize handlers
 	bootstrapHandler := handlers.NewBootstrapHandler(database)

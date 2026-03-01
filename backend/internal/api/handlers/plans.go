@@ -44,7 +44,7 @@ func NewPlansHandler(database *db.MongoDB, sysLogger *syslog.Logger, cfgStore *c
 // ListPlans returns all plans sorted by createdAt, enriched with subscriber counts.
 func (h *PlansHandler) ListPlans(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}})
+	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: 1}}).SetLimit(100)
 	cursor, err := h.db.Plans().Find(ctx, bson.M{}, opts)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to list plans")

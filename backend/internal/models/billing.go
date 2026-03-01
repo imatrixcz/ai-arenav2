@@ -69,6 +69,7 @@ type DailyMetric struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty"`
 	Date      string             `json:"date" bson:"date"`
 	DAU       int64              `json:"dau" bson:"dau"`
+	WAU       int64              `json:"wau" bson:"wau"`
 	MAU       int64              `json:"mau" bson:"mau"`
 	Revenue   int64              `json:"revenue" bson:"revenue"`
 	ARR       int64              `json:"arr" bson:"arr"`

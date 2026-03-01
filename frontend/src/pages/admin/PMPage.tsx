@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pmApi } from '../../api/client';
 import type { FunnelData, CohortRow, EngagementData, KPIData, EventTypeSummary } from '../../types';
@@ -19,12 +19,18 @@ const tooltipStyle = { backgroundColor: '#1e293b', border: '1px solid #334155', 
 const tooltipLabelStyle = { color: '#94a3b8' };
 
 function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range) => void }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout>>();
+  const debouncedChange = useCallback((r: Range) => {
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => onChange(r), 300);
+  }, [onChange]);
+
   return (
     <div className="flex gap-1 bg-dark-900/50 border border-dark-800 rounded-lg p-1">
       {(['7d', '30d', '90d', '1y'] as const).map(r => (
         <button
           key={r}
-          onClick={() => onChange(r)}
+          onClick={() => debouncedChange(r)}
           className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
             value === r ? 'bg-dark-700 text-white' : 'text-dark-400 hover:text-dark-300'
           }`}
@@ -34,6 +40,34 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
       ))}
     </div>
   );
+}
+
+// Bin daily data points into weekly or monthly buckets for large date ranges.
+function binChartData(points: { date: string; value: number }[], range: Range): { date: string; value: number }[] {
+  if (!points || points.length === 0) return points;
+  if (range === '7d' || range === '30d') return points;
+
+  const buckets = new Map<string, number>();
+  for (const p of points) {
+    let key: string;
+    if (range === '1y') {
+      // Monthly: YYYY-MM
+      key = p.date.slice(0, 7);
+    } else {
+      // Weekly (90d): ISO week start (Monday)
+      const d = new Date(p.date + 'T00:00:00Z');
+      const day = d.getUTCDay();
+      const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(d);
+      monday.setUTCDate(diff);
+      key = monday.toISOString().slice(0, 10);
+    }
+    buckets.set(key, (buckets.get(key) || 0) + p.value);
+  }
+
+  return Array.from(buckets.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, value]) => ({ date, value }));
 }
 
 function formatCents(v: number) {
@@ -326,9 +360,9 @@ function EngagementTab() {
               <XAxis dataKey="date" tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <YAxis tick={{ fontSize: 10, fill: '#64748b' }} tickLine={false} axisLine={false} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
-              {eng.dau?.length > 0 && <Line data={eng.dau} type="monotone" dataKey="value" name="DAU" stroke="#6366f1" strokeWidth={2} dot={false} />}
-              {eng.wau?.length > 0 && <Line data={eng.wau} type="monotone" dataKey="value" name="WAU" stroke="#10b981" strokeWidth={2} dot={false} />}
-              {eng.mau?.length > 0 && <Line data={eng.mau} type="monotone" dataKey="value" name="MAU" stroke="#eab308" strokeWidth={2} dot={false} />}
+              {eng.dau?.length > 0 && <Line data={binChartData(eng.dau, range)} type="monotone" dataKey="value" name="DAU" stroke="#6366f1" strokeWidth={2} dot={false} />}
+              {eng.wau?.length > 0 && <Line data={binChartData(eng.wau, range)} type="monotone" dataKey="value" name="WAU" stroke="#10b981" strokeWidth={2} dot={false} />}
+              {eng.mau?.length > 0 && <Line data={binChartData(eng.mau, range)} type="monotone" dataKey="value" name="MAU" stroke="#eab308" strokeWidth={2} dot={false} />}
             </LineChart>
           </ResponsiveContainer>
         </Card>
@@ -354,7 +388,7 @@ function EngagementTab() {
         <Card className="p-4">
           <h3 className="text-sm font-medium text-dark-400 mb-2">Credit Consumption</h3>
           <ResponsiveContainer width="100%" height={160}>
-            <AreaChart data={eng.creditTrend} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+            <AreaChart data={binChartData(eng.creditTrend, range)} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
               <defs>
                 <linearGradient id="creditGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.3} />
@@ -433,7 +467,7 @@ function EventsTab() {
                 {eventData.eventName ? `Trend: ${eventData.eventName}` : 'Event Trend'}
               </h3>
               <ResponsiveContainer width="100%" height={200}>
-                <AreaChart data={eventData.trend} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
+                <AreaChart data={binChartData(eventData.trend, range)} margin={{ top: 5, right: 5, bottom: 5, left: 5 }}>
                   <defs>
                     <linearGradient id="eventGrad" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />

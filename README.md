@@ -69,7 +69,7 @@ If you're evaluating SaaS boilerplates, you've probably looked at ShipFast, Supa
 
 **Product analytics with telemetry.** No competing boilerplate includes product analytics. LastSaaS auto-instruments the customer journey — visitor → signup → plan page → checkout → paid conversion → upgrade — and visualizes it as a conversion funnel. The PM dashboard includes SaaS KPIs (MRR, ARR, ARPU, LTV, churn rate, trial conversion), retention cohort analysis, engagement metrics (DAU/WAU/MAU for paying subscribers), and a custom event explorer. A Go SDK and REST API let you track your own events with zero configuration.
 
-**MCP server for AI-native operations.** This is unique to LastSaaS. A built-in Model Context Protocol server with 26 read-only tools lets you connect Claude (or any MCP-compatible AI) directly to your running application. Query your ARR trend, investigate error spikes, audit API keys, or review system health — all in natural language. No other SaaS boilerplate offers agentic admin access.
+**MCP server for AI-native operations.** This is unique to LastSaaS. A built-in Model Context Protocol server with 32 read-only tools lets you connect Claude (or any MCP-compatible AI) directly to your running application. Query your ARR trend, investigate error spikes, audit API keys, or review system health — all in natural language. No other SaaS boilerplate offers agentic admin access.
 
 **Built for AI-assisted development.** LastSaaS was built entirely through conversation with Claude Code, and the codebase is designed to keep being built that way. Consistent patterns, clear naming, and a structure AI agents navigate fluently. Fork it, point an agent at it, describe your product, and keep going. The competing boilerplates were built for manual development — LastSaaS is built for the way software is made now.
 
@@ -249,7 +249,7 @@ If you're evaluating SaaS boilerplates, you've probably looked at ShipFast, Supa
 
 A built-in [Model Context Protocol](https://modelcontextprotocol.io) server gives AI assistants like Claude read-only access to your admin data — dashboards, users, tenants, financials, logs, health, and more. Useful for asking questions like "what's our ARR trend?" or "show me critical logs from the last hour" in natural language.
 
-- **26 read-only tools** across 13 categories — no write operations, safe by design
+- **32 read-only tools** across 14 categories — no write operations, safe by design
 - **2 resources** — `lastsaas://dashboard` and `lastsaas://health` for automatic context
 - **API key authentication** — requires a root-tenant API key, same auth as the admin API
 - **Stdio transport** — runs locally, compatible with Claude Desktop and Claude Code

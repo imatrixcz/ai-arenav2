@@ -42,7 +42,27 @@ export default function RootMembersPage() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    adminApi.listRootMembers()
+      .then((data) => {
+        if (!controller.signal.aborted) {
+          setMembers(data.members);
+          setInvitations(data.invitations);
+        }
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          toast.error(getErrorMessage(err));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+    return () => controller.abort();
+  }, []);
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1729,12 +1729,13 @@ func (h *AdminHandler) InviteRootMember(w http.ResponseWriter, r *http.Request) 
 
 	now := time.Now()
 	token := generateRandomToken()
+	hashedInvToken := hashToken(token)
 	invitation := models.Invitation{
 		ID:        primitive.NewObjectID(),
 		TenantID:  rootTenant.ID,
 		Email:     req.Email,
 		Role:      req.Role,
-		Token:     token,
+		Token:     hashedInvToken,
 		Status:    models.InvitationPending,
 		InvitedBy: user.ID,
 		ExpiresAt: now.Add(7 * 24 * time.Hour),

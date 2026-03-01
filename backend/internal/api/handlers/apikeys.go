@@ -41,7 +41,7 @@ func NewAPIKeysHandler(database *db.MongoDB, emitter events.Emitter, sysLogger *
 
 // ListAPIKeys handles GET /api/admin/api-keys
 func (h *APIKeysHandler) ListAPIKeys(w http.ResponseWriter, r *http.Request) {
-	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}})
+	opts := options.Find().SetSort(bson.D{{Key: "createdAt", Value: -1}}).SetLimit(100)
 	cursor, err := h.db.APIKeys().Find(r.Context(), bson.M{"isActive": true}, opts)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to list API keys")

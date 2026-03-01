@@ -41,7 +41,7 @@ type Dispatcher struct {
 }
 
 const maxRetryWorkers = 5
-const retryQueueSize = 100
+const retryQueueSize = 500
 
 func NewDispatcher(database *db.MongoDB, encryptionKey []byte) *Dispatcher {
 	d := &Dispatcher{
@@ -53,7 +53,7 @@ func NewDispatcher(database *db.MongoDB, encryptionKey []byte) *Dispatcher {
 		stopCh:        make(chan struct{}),
 		stopped:       make(chan struct{}),
 		encryptionKey: encryptionKey,
-		emitSem:       make(chan struct{}, 10), // max 10 concurrent Emit dispatches
+		emitSem:       make(chan struct{}, 25), // max 25 concurrent Emit dispatches
 	}
 	go d.retryWorker()
 	return d

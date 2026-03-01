@@ -803,6 +803,8 @@ func (h *BillingHandler) AdminGetMetrics(w http.ResponseWriter, r *http.Request)
 			val = m.ARR
 		case "dau":
 			val = m.DAU
+		case "wau":
+			val = m.WAU
 		case "mau":
 			val = m.MAU
 		default:

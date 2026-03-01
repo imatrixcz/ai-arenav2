@@ -56,7 +56,31 @@ export default function PlansPage() {
     }
   }, []);
 
-  useEffect(() => { fetchPlans(); fetchBundles(); }, [fetchPlans, fetchBundles]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const loadData = async () => {
+      try {
+        const [plansData, bundlesData] = await Promise.all([
+          adminApi.listPlans(),
+          adminApi.listBundles(),
+        ]);
+        if (!controller.signal.aborted) {
+          setPlans(plansData.plans);
+          setBundles(bundlesData.bundles);
+        }
+      } catch (err) {
+        if (!controller.signal.aborted) {
+          toast.error(getErrorMessage(err));
+        }
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    };
+    loadData();
+    return () => controller.abort();
+  }, []);
 
   const confirmDelete = async () => {
     if (!deleteTarget) return;

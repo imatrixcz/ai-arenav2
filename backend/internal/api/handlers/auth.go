@@ -552,7 +552,7 @@ func (h *AuthHandler) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	err := h.db.VerificationTokens().FindOneAndUpdate(
 		r.Context(),
 		bson.M{
-			"token":     req.Token,
+			"token":     hashToken(req.Token),
 			"type":      models.TokenTypeEmailVerification,
 			"usedAt":    nil,
 			"expiresAt": bson.M{"$gt": now},
@@ -1907,10 +1907,11 @@ func (h *AuthHandler) createPersonalTenant(ctx context.Context, userID primitive
 
 func (h *AuthHandler) sendVerificationEmail(ctx context.Context, userID primitive.ObjectID, userEmail, displayName string) {
 	verificationToken := generateRandomToken()
+	hashedVerificationToken := hashToken(verificationToken)
 	verification := models.VerificationToken{
 		ID:        primitive.NewObjectID(),
 		UserID:    userID,
-		Token:     verificationToken,
+		Token:     hashedVerificationToken,
 		Type:      models.TokenTypeEmailVerification,
 		ExpiresAt: time.Now().Add(24 * time.Hour),
 		CreatedAt: time.Now(),
@@ -1967,11 +1968,12 @@ func (h *AuthHandler) getUserMemberships(ctx context.Context, userID primitive.O
 
 func (h *AuthHandler) acceptInvitationForUser(ctx context.Context, userID primitive.ObjectID, token string) error {
 	now := time.Now()
+	hashedInvToken := hashToken(token)
 
 	// Look up invitation first (without modifying it) so we can validate email before claiming it
 	var invitation models.Invitation
 	err := h.db.Invitations().FindOne(ctx, bson.M{
-		"token":     token,
+		"token":     hashedInvToken,
 		"status":    models.InvitationPending,
 		"expiresAt": bson.M{"$gt": now},
 	}).Decode(&invitation)

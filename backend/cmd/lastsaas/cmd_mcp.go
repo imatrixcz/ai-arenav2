@@ -126,6 +126,7 @@ func cmdMCP() {
 	registerPromotionTools(s, client)
 	registerSecurityTools(s, client)
 	registerWebhookTools(s, client)
+	registerPMTools(s, client)
 	registerResources(s, client)
 
 	if err := server.ServeStdio(s); err != nil {
@@ -712,6 +713,128 @@ func registerWebhookTools(s *server.MCPServer, client *mcpClient) {
 				return mcp.NewToolResultError("id is required"), nil
 			}
 			data, err := client.get(ctx, "/api/admin/webhooks/"+id)
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+}
+
+// ---------------------------------------------------------------------------
+// PM / Telemetry tools (6)
+// ---------------------------------------------------------------------------
+
+func registerPMTools(s *server.MCPServer, client *mcpClient) {
+	// get_funnel
+	s.AddTool(
+		mcp.NewTool("get_funnel",
+			mcp.WithDescription("Get conversion funnel metrics: unique visitors, registrations, plan page views, checkouts started, paid conversions, and upgrades with step-by-step conversion rates"),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("range", mcp.Description("Time range: 7d, 30d, 90d, or 1y (default 30d)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			q := map[string]string{
+				"range": req.GetString("range", ""),
+			}
+			data, err := client.get(ctx, "/api/admin/pm/funnel"+buildQuery(q))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+
+	// get_kpis
+	s.AddTool(
+		mcp.NewTool("get_kpis",
+			mcp.WithDescription("Get SaaS KPI snapshot: MRR, ARR, ARPU, LTV (all in cents), churn rate, trial conversion rate, time to first purchase, active subscribers, plan distribution, and 30-day MRR/subscriber trends"),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			data, err := client.get(ctx, "/api/admin/pm/kpis")
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+
+	// get_retention
+	s.AddTool(
+		mcp.NewTool("get_retention",
+			mcp.WithDescription("Get cohort retention analysis showing what percentage of users return in subsequent periods after signup"),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("granularity", mcp.Description("Cohort granularity: weekly or monthly (default weekly)")),
+			mcp.WithNumber("periods", mcp.Description("Number of retention periods to compute, 1-52 (default 12)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			q := map[string]string{
+				"granularity": req.GetString("granularity", ""),
+			}
+			if v := req.GetInt("periods", 0); v > 0 {
+				q["periods"] = fmt.Sprintf("%d", v)
+			}
+			data, err := client.get(ctx, "/api/admin/pm/retention"+buildQuery(q))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+
+	// get_engagement
+	s.AddTool(
+		mcp.NewTool("get_engagement",
+			mcp.WithDescription("Get engagement metrics for paying subscribers: DAU/WAU/MAU time series, average sessions per user per week, top features by usage, and credit consumption trend"),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("range", mcp.Description("Time range: 7d, 30d, 90d, or 1y (default 30d)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			q := map[string]string{
+				"range": req.GetString("range", ""),
+			}
+			data, err := client.get(ctx, "/api/admin/pm/engagement"+buildQuery(q))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+
+	// get_custom_events
+	s.AddTool(
+		mcp.NewTool("get_custom_events",
+			mcp.WithDescription("Get trend data and total count for a specific telemetry event type over a time range. Use list_event_types to discover available event names."),
+			mcp.WithReadOnlyHintAnnotation(true),
+			mcp.WithString("name", mcp.Required(), mcp.Description("Event type name (e.g. page.view, user.login, checkout.started)")),
+			mcp.WithString("range", mcp.Description("Time range: 7d, 30d, 90d, or 1y (default 30d)")),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			name, err := req.RequireString("name")
+			if err != nil {
+				return mcp.NewToolResultError("name is required"), nil
+			}
+			q := map[string]string{
+				"name":  name,
+				"range": req.GetString("range", ""),
+			}
+			data, err := client.get(ctx, "/api/admin/pm/events"+buildQuery(q))
+			if err != nil {
+				return mcp.NewToolResultError(err.Error()), nil
+			}
+			return mcp.NewToolResultText(prettyJSON(data)), nil
+		},
+	)
+
+	// list_event_types
+	s.AddTool(
+		mcp.NewTool("list_event_types",
+			mcp.WithDescription("List all distinct telemetry event types with category, total count, and last seen timestamp"),
+			mcp.WithReadOnlyHintAnnotation(true),
+		),
+		func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+			data, err := client.get(ctx, "/api/admin/pm/events/types")
 			if err != nil {
 				return mcp.NewToolResultError(err.Error()), nil
 			}

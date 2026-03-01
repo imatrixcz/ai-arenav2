@@ -122,11 +122,31 @@ export default function BrandingThemeInjector() {
       el.style.display = 'none';
       document.head.appendChild(el);
     }
-    el.innerHTML = DOMPurify.sanitize(snippet, { ADD_TAGS: ['script'], ADD_ATTR: ['async', 'defer', 'src'] });
+    // Parse the snippet for script tags and create proper DOM elements.
+    // innerHTML doesn't execute <script> tags, so we extract src attributes
+    // and create real script elements appended directly to <head>.
+    const cleaned = DOMPurify.sanitize(snippet, { ADD_TAGS: ['script'], ADD_ATTR: ['async', 'defer', 'src'] });
+    const tmp = document.createElement('div');
+    tmp.innerHTML = cleaned;
+    const scripts = tmp.querySelectorAll('script');
+    scripts.forEach((s) => {
+      if (s.src) {
+        const script = document.createElement('script');
+        script.src = s.src;
+        if (s.async) script.async = true;
+        if (s.defer) script.defer = true;
+        script.dataset.brandingAnalytics = 'true';
+        document.head.appendChild(script);
+      }
+      // Inline scripts from admin branding are intentionally not executed
+      // to prevent XSS. Only external script sources are allowed.
+    });
 
     return () => {
       const existing = document.getElementById(id);
       if (existing) existing.remove();
+      // Also remove dynamically created script elements
+      document.head.querySelectorAll('script[data-branding-analytics]').forEach((s) => s.remove());
     };
   }, [loaded, branding.analyticsSnippet, isAdmin]);
 
@@ -165,7 +185,7 @@ export default function BrandingThemeInjector() {
       el.style.display = 'none';
       document.head.appendChild(el);
     }
-    el.innerHTML = DOMPurify.sanitize(html, { ADD_TAGS: ['script', 'link', 'meta'], ADD_ATTR: ['async', 'defer', 'src', 'href', 'rel', 'content', 'property'] });
+    el.innerHTML = DOMPurify.sanitize(html, { ADD_TAGS: ['link', 'meta'], ADD_ATTR: ['href', 'rel', 'content', 'property'] });
 
     return () => {
       const existing = document.getElementById(id);

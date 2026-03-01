@@ -56,7 +56,7 @@ func validateBundleRequest(req *bundleRequest) error {
 
 // ListBundles returns all credit bundles for admin.
 func (h *BundlesHandler) ListBundles(w http.ResponseWriter, r *http.Request) {
-	opts := options.Find().SetSort(bson.D{{Key: "sortOrder", Value: 1}, {Key: "createdAt", Value: 1}})
+	opts := options.Find().SetSort(bson.D{{Key: "sortOrder", Value: 1}, {Key: "createdAt", Value: 1}}).SetLimit(100)
 	cursor, err := h.db.CreditBundles().Find(r.Context(), bson.M{}, opts)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Failed to list credit bundles")

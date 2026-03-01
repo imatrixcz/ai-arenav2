@@ -28,7 +28,9 @@ export default function SignupPage() {
   const { register } = useAuth();
   const { branding } = useBranding();
   const [searchParams] = useSearchParams();
-  const invitationToken = searchParams.get('invitation') || undefined;
+  const rawInvitation = searchParams.get('invitation') || '';
+  // Validate invitation token format: alphanumeric, hyphens, underscores only
+  const invitationToken = /^[a-zA-Z0-9_-]{1,128}$/.test(rawInvitation) ? rawInvitation : undefined;
 
   const [form, setForm] = useState({ email: '', password: '', displayName: '' });
   const [error, setError] = useState('');

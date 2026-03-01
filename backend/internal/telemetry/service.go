@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"sync"
 	"time"
 
 	"lastsaas/internal/db"
@@ -16,21 +17,94 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
+const (
+	trackBufferSize = 200          // max events buffered before forced flush
+	trackFlushInterval = 100 * time.Millisecond
+	kpiCacheTTL = 5 * time.Minute
+)
+
 // Service provides telemetry tracking and querying for product analytics.
 // Apps using LastSaaS as a library can call Track/TrackBatch directly
 // without going through the HTTP API.
 type Service struct {
 	db *db.MongoDB
+
+	// Async write buffer
+	trackCh chan models.TelemetryEvent
+	stopCh  chan struct{}
+	stopped chan struct{}
+
+	// KPI cache
+	kpiMu      sync.Mutex
+	kpiCache   *KPIData
+	kpiCachedAt time.Time
 }
 
-// New creates a new telemetry service.
+// New creates a new telemetry service with async write buffering.
 func New(database *db.MongoDB) *Service {
-	return &Service{db: database}
+	s := &Service{
+		db:      database,
+		trackCh: make(chan models.TelemetryEvent, trackBufferSize),
+		stopCh:  make(chan struct{}),
+		stopped: make(chan struct{}),
+	}
+	go s.flushLoop()
+	return s
+}
+
+// Stop gracefully drains the track buffer and shuts down the flush loop.
+func (s *Service) Stop() {
+	close(s.stopCh)
+	<-s.stopped
+}
+
+// flushLoop batches buffered events and writes them periodically.
+func (s *Service) flushLoop() {
+	defer close(s.stopped)
+	ticker := time.NewTicker(trackFlushInterval)
+	defer ticker.Stop()
+
+	buf := make([]interface{}, 0, trackBufferSize)
+	flush := func() {
+		if len(buf) == 0 {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_, err := s.db.TelemetryEvents().InsertMany(ctx, buf)
+		cancel()
+		if err != nil {
+			slog.Warn("telemetry: flush failed", "count", len(buf), "error", err)
+		}
+		buf = buf[:0]
+	}
+
+	for {
+		select {
+		case ev := <-s.trackCh:
+			buf = append(buf, ev)
+			if len(buf) >= trackBufferSize {
+				flush()
+			}
+		case <-ticker.C:
+			flush()
+		case <-s.stopCh:
+			// Drain remaining
+			for {
+				select {
+				case ev := <-s.trackCh:
+					buf = append(buf, ev)
+				default:
+					flush()
+					return
+				}
+			}
+		}
+	}
 }
 
 // --- Tracking (Go SDK) ---
 
-// Track records a single telemetry event.
+// Track records a single telemetry event asynchronously via the write buffer.
 func (s *Service) Track(ctx context.Context, event models.TelemetryEvent) error {
 	if event.ID.IsZero() {
 		event.ID = primitive.NewObjectID()
@@ -38,11 +112,17 @@ func (s *Service) Track(ctx context.Context, event models.TelemetryEvent) error 
 	if event.CreatedAt.IsZero() {
 		event.CreatedAt = time.Now()
 	}
-	_, err := s.db.TelemetryEvents().InsertOne(ctx, event)
-	if err != nil {
-		slog.Warn("telemetry: failed to track event", "event", event.EventName, "error", err)
+	select {
+	case s.trackCh <- event:
+		return nil
+	default:
+		// Buffer full — fall back to synchronous write
+		_, err := s.db.TelemetryEvents().InsertOne(ctx, event)
+		if err != nil {
+			slog.Warn("telemetry: sync fallback write failed", "event", event.EventName, "error", err)
+		}
+		return err
 	}
-	return err
 }
 
 // TrackBatch records multiple events.
@@ -250,62 +330,106 @@ func buildFunnelSteps(visitors, registrations, planViews, checkouts, conversions
 	return steps
 }
 
-// RetentionCohorts computes cohort retention data.
+// RetentionCohorts computes cohort retention data using a single aggregation pipeline.
 func (s *Service) RetentionCohorts(ctx context.Context, granularity string, periods int) ([]CohortRow, error) {
 	if periods <= 0 {
 		periods = 12
 	}
 
-	var interval time.Duration
+	var intervalMs int64
 	var labelFormat string
 	switch granularity {
 	case "monthly":
-		interval = 30 * 24 * time.Hour
+		intervalMs = 30 * 24 * 60 * 60 * 1000
 		labelFormat = "2006-01"
 	default:
 		granularity = "weekly"
-		interval = 7 * 24 * time.Hour
-		labelFormat = "2006-W02" // ISO week approximation
+		intervalMs = 7 * 24 * 60 * 60 * 1000
+		labelFormat = "2006-W02"
 	}
 
+	interval := time.Duration(intervalMs) * time.Millisecond
 	now := time.Now()
-	rows := make([]CohortRow, 0, periods)
+	earliestCohortStart := now.Add(-time.Duration(periods) * interval)
 
-	for i := periods - 1; i >= 0; i-- {
-		cohortStart := now.Add(-time.Duration(i+1) * interval)
-		cohortEnd := now.Add(-time.Duration(i) * interval)
-
-		// Count users who registered in this cohort window
-		cohortFilter := bson.M{
-			"createdAt": bson.M{"$gte": cohortStart, "$lt": cohortEnd},
+	// Single aggregation: bucket users into cohorts, then use $facet to count
+	// retention for each period within each cohort.
+	pipeline := mongo.Pipeline{
+		// Match active users created within the cohort window
+		{{Key: "$match", Value: bson.M{
 			"isActive":  true,
+			"createdAt": bson.M{"$gte": earliestCohortStart, "$lt": now},
+		}}},
+		// Assign each user to a cohort index based on registration time
+		{{Key: "$addFields", Value: bson.M{
+			"cohortIdx": bson.M{
+				"$floor": bson.M{
+					"$divide": []interface{}{
+						bson.M{"$subtract": []interface{}{"$createdAt", earliestCohortStart}},
+						intervalMs,
+					},
+				},
+			},
+		}}},
+		// Group by cohort, collect lastLoginAt values
+		{{Key: "$group", Value: bson.M{
+			"_id":        "$cohortIdx",
+			"cohortSize": bson.M{"$sum": 1},
+			"users": bson.M{"$push": bson.M{
+				"lastLoginAt": "$lastLoginAt",
+				"createdAt":   "$createdAt",
+			}},
+		}}},
+		{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
+	}
+
+	cursor, err := s.db.Users().Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	defer cursor.Close(ctx)
+
+	type userInfo struct {
+		LastLoginAt *time.Time `bson:"lastLoginAt"`
+		CreatedAt   time.Time  `bson:"createdAt"`
+	}
+	type cohortResult struct {
+		CohortIdx  int        `bson:"_id"`
+		CohortSize int64      `bson:"cohortSize"`
+		Users      []userInfo `bson:"users"`
+	}
+
+	rows := make([]CohortRow, 0, periods)
+	for cursor.Next(ctx) {
+		var cr cohortResult
+		if cursor.Decode(&cr) != nil {
+			continue
 		}
-		cohortSize, _ := s.db.Users().CountDocuments(ctx, cohortFilter)
-		if cohortSize == 0 {
+		if cr.CohortSize == 0 {
 			continue
 		}
 
-		// For each subsequent period, check how many had lastLoginAt within that window
-		retention := make([]float64, 0)
-		retention = append(retention, 100) // Period 0 is always 100%
+		cohortStart := earliestCohortStart.Add(time.Duration(cr.CohortIdx) * interval)
+		cohortEnd := cohortStart.Add(interval)
+		maxPeriods := int(now.Sub(cohortEnd) / interval)
 
-		for p := 1; p <= i; p++ {
+		retention := []float64{100} // P0 is always 100%
+		for p := 1; p <= maxPeriods; p++ {
 			periodStart := cohortEnd.Add(time.Duration(p-1) * interval)
 			periodEnd := cohortEnd.Add(time.Duration(p) * interval)
-
-			activeCount, _ := s.db.Users().CountDocuments(ctx, bson.M{
-				"createdAt":   bson.M{"$gte": cohortStart, "$lt": cohortEnd},
-				"isActive":    true,
-				"lastLoginAt": bson.M{"$gte": periodStart, "$lt": periodEnd},
-			})
-
-			pct := math.Round(float64(activeCount)/float64(cohortSize)*10000) / 100
+			var active int64
+			for _, u := range cr.Users {
+				if u.LastLoginAt != nil && !u.LastLoginAt.Before(periodStart) && u.LastLoginAt.Before(periodEnd) {
+					active++
+				}
+			}
+			pct := math.Round(float64(active)/float64(cr.CohortSize)*10000) / 100
 			retention = append(retention, pct)
 		}
 
 		rows = append(rows, CohortRow{
 			CohortLabel: cohortStart.Format(labelFormat),
-			CohortSize:  cohortSize,
+			CohortSize:  cr.CohortSize,
 			Retention:   retention,
 		})
 	}
@@ -369,7 +493,30 @@ func (s *Service) EngagementMetrics(ctx context.Context, start, end time.Time) (
 }
 
 // KPIs computes high-level product management KPIs.
+// Results are cached in-process for 5 minutes to avoid repeated heavy aggregation.
 func (s *Service) KPIs(ctx context.Context) (*KPIData, error) {
+	s.kpiMu.Lock()
+	if s.kpiCache != nil && time.Since(s.kpiCachedAt) < kpiCacheTTL {
+		cached := s.kpiCache
+		s.kpiMu.Unlock()
+		return cached, nil
+	}
+	s.kpiMu.Unlock()
+
+	result, err := s.computeKPIs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.kpiMu.Lock()
+	s.kpiCache = result
+	s.kpiCachedAt = time.Now()
+	s.kpiMu.Unlock()
+
+	return result, nil
+}
+
+func (s *Service) computeKPIs(ctx context.Context) (*KPIData, error) {
 	now := time.Now()
 	monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	prevMonthStart := monthStart.AddDate(0, -1, 0)
@@ -466,7 +613,7 @@ func (s *Service) CustomEventSummary(ctx context.Context, start, end time.Time, 
 
 	totalCount, _ := s.db.TelemetryEvents().CountDocuments(ctx, filter)
 
-	// Daily trend
+	// Daily trend (capped at 400 days to prevent unbounded results)
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: filter}},
 		{{Key: "$group", Value: bson.M{
@@ -474,6 +621,7 @@ func (s *Service) CustomEventSummary(ctx context.Context, start, end time.Time, 
 			"count": bson.M{"$sum": 1},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
+		{{Key: "$limit", Value: 400}},
 	}
 
 	cursor, err := s.db.TelemetryEvents().Aggregate(ctx, pipeline)
@@ -509,6 +657,7 @@ func (s *Service) ListEventTypes(ctx context.Context) ([]EventTypeSummary, error
 			"lastSeen": bson.M{"$max": "$createdAt"},
 		}}},
 		{{Key: "$sort", Value: bson.D{{Key: "count", Value: -1}}}},
+		{{Key: "$limit", Value: 500}},
 	}
 
 	cursor, err := s.db.TelemetryEvents().Aggregate(ctx, pipeline)
@@ -794,7 +943,7 @@ func (s *Service) creditConsumptionTrend(ctx context.Context, start, end time.Ti
 }
 
 func (s *Service) calculateMRR(ctx context.Context) int64 {
-	// Join active tenants with their plans to compute MRR
+	// Pure aggregation pipeline: join tenants→plans, compute per-tenant MRR, sum.
 	pipeline := mongo.Pipeline{
 		{{Key: "$match", Value: bson.M{
 			"billingStatus": models.BillingStatusActive,
@@ -808,10 +957,44 @@ func (s *Service) calculateMRR(ctx context.Context) int64 {
 			"as":           "plan",
 		}}},
 		{{Key: "$unwind", Value: "$plan"}},
-		{{Key: "$project", Value: bson.M{
-			"billingInterval": 1,
-			"seatQuantity":    1,
-			"plan":            1,
+		// Compute extra seats (clamped to 0)
+		{{Key: "$addFields", Value: bson.M{
+			"_extraSeats": bson.M{"$max": bson.A{
+				bson.M{"$subtract": bson.A{
+					bson.M{"$ifNull": bson.A{"$seatQuantity", 0}},
+					bson.M{"$ifNull": bson.A{"$plan.includedSeats", 0}},
+				}},
+				0,
+			}},
+		}}},
+		// Compute base monthly amount (flat vs per-seat)
+		{{Key: "$addFields", Value: bson.M{
+			"_monthly": bson.M{"$cond": bson.M{
+				"if":   bson.M{"$eq": bson.A{"$plan.pricingModel", "per_seat"}},
+				"then": bson.M{"$add": bson.A{"$plan.monthlyPriceCents", bson.M{"$multiply": bson.A{"$_extraSeats", "$plan.perSeatPriceCents"}}}},
+				"else": "$plan.monthlyPriceCents",
+			}},
+		}}},
+		// Apply annual discount if applicable
+		{{Key: "$addFields", Value: bson.M{
+			"_monthly": bson.M{"$cond": bson.M{
+				"if": bson.M{"$and": bson.A{
+					bson.M{"$eq": bson.A{"$billingInterval", "year"}},
+					bson.M{"$gt": bson.A{bson.M{"$ifNull": bson.A{"$plan.annualDiscountPct", 0}}, 0}},
+				}},
+				"then": bson.M{"$divide": bson.A{
+					bson.M{"$multiply": bson.A{
+						bson.M{"$multiply": bson.A{"$_monthly", 12}},
+						bson.M{"$subtract": bson.A{1, bson.M{"$divide": bson.A{"$plan.annualDiscountPct", 100}}}},
+					}},
+					12,
+				}},
+				"else": "$_monthly",
+			}},
+		}}},
+		{{Key: "$group", Value: bson.M{
+			"_id":      nil,
+			"totalMRR": bson.M{"$sum": "$_monthly"},
 		}}},
 	}
 
@@ -821,42 +1004,15 @@ func (s *Service) calculateMRR(ctx context.Context) int64 {
 	}
 	defer cursor.Close(ctx)
 
-	var totalMRR int64
-	for cursor.Next(ctx) {
+	if cursor.Next(ctx) {
 		var result struct {
-			BillingInterval string `bson:"billingInterval"`
-			SeatQuantity    int    `bson:"seatQuantity"`
-			Plan            struct {
-				MonthlyPriceCents int64  `bson:"monthlyPriceCents"`
-				AnnualDiscountPct int    `bson:"annualDiscountPct"`
-				PricingModel      string `bson:"pricingModel"`
-				PerSeatPriceCents int64  `bson:"perSeatPriceCents"`
-				IncludedSeats     int    `bson:"includedSeats"`
-			} `bson:"plan"`
+			TotalMRR int64 `bson:"totalMRR"`
 		}
-		if cursor.Decode(&result) != nil {
-			continue
+		if cursor.Decode(&result) == nil {
+			return result.TotalMRR
 		}
-
-		var monthly int64
-		if result.Plan.PricingModel == "per_seat" {
-			baseMRR := result.Plan.MonthlyPriceCents
-			extraSeats := result.SeatQuantity - result.Plan.IncludedSeats
-			if extraSeats < 0 {
-				extraSeats = 0
-			}
-			monthly = baseMRR + int64(extraSeats)*result.Plan.PerSeatPriceCents
-		} else {
-			monthly = result.Plan.MonthlyPriceCents
-		}
-
-		if result.BillingInterval == "year" && result.Plan.AnnualDiscountPct > 0 {
-			annual := float64(monthly*12) * (1 - float64(result.Plan.AnnualDiscountPct)/100)
-			monthly = int64(annual / 12)
-		}
-		totalMRR += monthly
 	}
-	return totalMRR
+	return 0
 }
 
 func (s *Service) medianTimeToFirstPurchase(ctx context.Context) float64 {

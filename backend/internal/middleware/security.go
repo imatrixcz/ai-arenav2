@@ -29,6 +29,7 @@ func SecurityHeaders(next http.Handler) http.Handler {
 				"img-src 'self' data: https:; "+
 				"font-src 'self' https:; "+
 				"connect-src 'self' https:; "+
+				"object-src 'none'; "+
 				"base-uri 'self'; "+
 				"frame-ancestors "+frameAncestors+"; "+
 				"form-action 'self';")
