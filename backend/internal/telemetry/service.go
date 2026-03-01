@@ -482,7 +482,7 @@ func (s *Service) CustomEventSummary(ctx context.Context, start, end time.Time, 
 	}
 	defer cursor.Close(ctx)
 
-	var trend []DailyPoint
+	trend := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			Date  string `bson:"_id"`
@@ -666,7 +666,7 @@ func (s *Service) weeklyActiveUsers(ctx context.Context, userIDs []primitive.Obj
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			ID struct {
@@ -713,7 +713,7 @@ func (s *Service) monthlyActiveUsers(ctx context.Context, userIDs []primitive.Ob
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			ID struct {
@@ -750,7 +750,7 @@ func (s *Service) topCustomEvents(ctx context.Context, start, end time.Time, lim
 	}
 	defer cursor.Close(ctx)
 
-	var features []FeatureUse
+	features := []FeatureUse{}
 	for cursor.Next(ctx) {
 		var result struct {
 			Name  string `bson:"_id"`
@@ -780,7 +780,7 @@ func (s *Service) creditConsumptionTrend(ctx context.Context, start, end time.Ti
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			Date  string `bson:"_id"`
@@ -940,7 +940,7 @@ func (s *Service) planDistribution(ctx context.Context) []PlanShare {
 	}
 	defer cursor.Close(ctx)
 
-	var shares []PlanShare
+	shares := []PlanShare{}
 	var total int64
 	for cursor.Next(ctx) {
 		var result struct {
@@ -980,7 +980,7 @@ func (s *Service) mrrTrend(ctx context.Context, start, end time.Time) []DailyPoi
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var m models.DailyMetric
 		if cursor.Decode(&m) == nil {
@@ -1010,7 +1010,7 @@ func (s *Service) subscriberTrend(ctx context.Context, start, end time.Time) []D
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			Date  string `bson:"_id"`
@@ -1030,7 +1030,7 @@ func (s *Service) aggregateDailyPoints(ctx context.Context, pipeline mongo.Pipel
 	}
 	defer cursor.Close(ctx)
 
-	var points []DailyPoint
+	points := []DailyPoint{}
 	for cursor.Next(ctx) {
 		var result struct {
 			Date  string `bson:"_id"`
