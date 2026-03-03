@@ -32,6 +32,7 @@ func AllSchemas() []CollectionSchema {
 		messagesSchema(),
 		usageEventsSchema(),
 		ssoConnectionsSchema(),
+		eventDefinitionsSchema(),
 	}
 }
 
@@ -583,6 +584,38 @@ func ssoConnectionsSchema() CollectionSchema {
 					},
 					"idpCertificate": bson.M{
 						"bsonType": "string",
+					},
+					"createdAt": bson.M{
+						"bsonType": "date",
+					},
+					"updatedAt": bson.M{
+						"bsonType": "date",
+					},
+				},
+			},
+		},
+	}
+}
+
+func eventDefinitionsSchema() CollectionSchema {
+	return CollectionSchema{
+		Collection: "event_definitions",
+		Schema: bson.M{
+			"$jsonSchema": bson.M{
+				"bsonType": "object",
+				"required": bson.A{"name", "createdAt", "updatedAt"},
+				"properties": bson.M{
+					"name": bson.M{
+						"bsonType":  "string",
+						"minLength": 1,
+						"maxLength": 128,
+					},
+					"description": bson.M{
+						"bsonType":  "string",
+						"maxLength": 256,
+					},
+					"parentId": bson.M{
+						"bsonType": "objectId",
 					},
 					"createdAt": bson.M{
 						"bsonType": "date",

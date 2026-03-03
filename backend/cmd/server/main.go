@@ -320,6 +320,7 @@ func main() {
 	webhookHandler := handlers.NewWebhookHandler(stripeSvc, database, emitter, sysLogger, cfgStore.Get)
 	webhookHandler.SetTelemetry(telemetrySvc)
 	pmHandler := handlers.NewPMHandler(database, telemetrySvc, sysLogger)
+	eventDefsHandler := handlers.NewEventDefinitionsHandler(database, sysLogger)
 	telemetryHandler := handlers.NewTelemetryHandler(telemetrySvc)
 	apiKeysHandler := handlers.NewAPIKeysHandler(database, emitter, sysLogger)
 	webhooksHandler := handlers.NewWebhooksHandler(database, sysLogger, webhookDispatcher)
@@ -678,6 +679,8 @@ func main() {
 	adminAPI.HandleFunc("/pm/kpis", pmHandler.GetKPIs).Methods("GET")
 	adminAPI.HandleFunc("/pm/events", pmHandler.GetCustomEvents).Methods("GET")
 	adminAPI.HandleFunc("/pm/events/types", pmHandler.ListEventTypes).Methods("GET")
+	adminAPI.HandleFunc("/pm/event-definitions", eventDefsHandler.ListEventDefinitions).Methods("GET")
+	adminAPI.HandleFunc("/pm/event-definitions/sankey", eventDefsHandler.GetSankeyData).Methods("GET")
 
 	// Admin-level write routes (admin+ role)
 	adminWrite := adminAPI.PathPrefix("").Subrouter()
@@ -715,6 +718,9 @@ func main() {
 	adminWrite.HandleFunc("/webhooks/{webhookId}", webhooksHandler.DeleteWebhook).Methods("DELETE")
 	adminWrite.HandleFunc("/webhooks/{webhookId}/test", webhooksHandler.TestWebhook).Methods("POST")
 	adminWrite.HandleFunc("/webhooks/{webhookId}/regenerate-secret", webhooksHandler.RegenerateSecret).Methods("POST")
+	adminWrite.HandleFunc("/pm/event-definitions", eventDefsHandler.CreateEventDefinition).Methods("POST")
+	adminWrite.HandleFunc("/pm/event-definitions/{defId}", eventDefsHandler.UpdateEventDefinition).Methods("PUT")
+	adminWrite.HandleFunc("/pm/event-definitions/{defId}", eventDefsHandler.DeleteEventDefinition).Methods("DELETE")
 
 	// Owner-only admin actions (impersonate, delete users, branding, billing management)
 	adminOwner := adminAPI.PathPrefix("").Subrouter()

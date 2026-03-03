@@ -673,6 +673,24 @@ export interface EventTypeSummary {
   lastSeen: string;
 }
 
+// --- Event Definitions ---
+
+export interface EventDefinition {
+  id: string;
+  name: string;
+  description: string;
+  parentId?: string;
+  count?: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SankeyData {
+  nodes: { name: string }[];
+  links: { source: number; target: number; value: number }[];
+  hasDependencies: boolean;
+}
+
 // --- Usage Metering ---
 
 export interface UsageSummaryItem {

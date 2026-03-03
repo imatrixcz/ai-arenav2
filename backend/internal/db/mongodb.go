@@ -296,6 +296,13 @@ func (m *MongoDB) ensureIndexes() {
 				{Keys: bson.D{{Key: "properties.page", Value: 1}, {Key: "createdAt", Value: -1}}, Options: options.Index().SetSparse(true)},
 			},
 		},
+		{
+			"event_definitions",
+			[]mongo.IndexModel{
+				{Keys: bson.D{{Key: "name", Value: 1}}, Options: options.Index().SetUnique(true)},
+				{Keys: bson.D{{Key: "parentId", Value: 1}}, Options: options.Index().SetSparse(true)},
+			},
+		},
 	}
 
 	// Collections where unique index failure is a data integrity risk
@@ -469,4 +476,8 @@ func (m *MongoDB) ImpersonationLogs() *mongo.Collection {
 
 func (m *MongoDB) TelemetryEvents() *mongo.Collection {
 	return m.Database.Collection("telemetry_events")
+}
+
+func (m *MongoDB) EventDefinitions() *mongo.Collection {
+	return m.Database.Collection("event_definitions")
 }

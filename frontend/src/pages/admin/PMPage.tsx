@@ -1,16 +1,19 @@
-import { useState, useRef, useCallback } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useState, useRef, useCallback, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { pmApi } from '../../api/client';
-import type { FunnelData, CohortRow, EngagementData, KPIData, EventTypeSummary } from '../../types';
+import type { FunnelData, CohortRow, EngagementData, KPIData, EventTypeSummary, EventDefinition } from '../../types';
 import LoadingSpinner from '../../components/LoadingSpinner';
 import { Card } from '../../components/ui';
+import ConfirmModal from '../../components/ConfirmModal';
+import EventDefinitionModal from './EventDefinitionModal';
 import {
   ResponsiveContainer, AreaChart, Area, BarChart, Bar, LineChart, Line,
-  XAxis, YAxis, Tooltip, CartesianGrid,
+  XAxis, YAxis, Tooltip, CartesianGrid, Sankey,
 } from 'recharts';
 import {
-  TrendingUp, Users, DollarSign, Percent, Clock, UserCheck, BarChart3, Zap,
+  TrendingUp, Users, DollarSign, Percent, Clock, UserCheck, BarChart3, Zap, Plus, Pencil, Trash2, GitBranch,
 } from 'lucide-react';
+import { toast } from 'sonner';
 
 type Tab = 'funnel' | 'kpis' | 'retention' | 'engagement' | 'events';
 type Range = '7d' | '30d' | '90d' | '1y';
@@ -411,8 +414,21 @@ function EngagementTab() {
 
 // --- Events Tab ---
 
-function EventsTab() {
-  const [range, setRange] = useState<Range>('30d');
+type EventSubTab = 'flow' | 'graph';
+
+// Custom Sankey node renderer with labels.
+function SankeyNode({ x, y, width, height, payload }: { x: number; y: number; width: number; height: number; payload: { name: string; value?: number } }) {
+  return (
+    <g>
+      <rect x={x} y={y} width={width} height={height} fill="#6366f1" stroke="#818cf8" strokeWidth={1} rx={3} />
+      <text x={x + width + 8} y={y + height / 2} textAnchor="start" dominantBaseline="central" fill="#e2e8f0" fontSize={12}>
+        {payload.name}
+      </text>
+    </g>
+  );
+}
+
+function GraphSubTab({ range }: { range: Range }) {
   const [selectedEvent, setSelectedEvent] = useState('');
 
   const { data: typesData } = useQuery({
@@ -429,11 +445,6 @@ function EventsTab() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h2 className="text-lg font-semibold text-white">Event Explorer</h2>
-        <RangeSelector value={range} onChange={setRange} />
-      </div>
-
       <div className="flex gap-4 items-center">
         <select
           value={selectedEvent}
@@ -487,7 +498,6 @@ function EventsTab() {
         </>
       ) : null}
 
-      {/* Event Types Table */}
       {eventTypes.length > 0 && (
         <Card className="p-4">
           <h3 className="text-sm font-medium text-dark-400 mb-4">All Event Types</h3>
@@ -519,6 +529,228 @@ function EventsTab() {
           </table>
         </Card>
       )}
+    </div>
+  );
+}
+
+function FlowSubTab({ range, definitions, onEdit, onDelete }: {
+  range: Range;
+  definitions: EventDefinition[];
+  onEdit: (def: EventDefinition) => void;
+  onDelete: (def: EventDefinition) => void;
+}) {
+  const { data: sankeyData, isLoading } = useQuery({
+    queryKey: ['pm', 'sankey', range],
+    queryFn: () => pmApi.getSankeyData({ range }),
+  });
+
+  const defMap = new Map(definitions.map(d => [d.id, d]));
+  const getParentName = (def: EventDefinition) => {
+    if (!def.parentId) return null;
+    return defMap.get(def.parentId)?.name ?? null;
+  };
+
+  return (
+    <div className="space-y-6">
+      {isLoading ? (
+        <LoadingSpinner size="lg" className="py-10" />
+      ) : sankeyData && sankeyData.hasDependencies && sankeyData.nodes.length > 0 && sankeyData.links.length > 0 ? (
+        <Card className="p-4">
+          <h3 className="text-sm font-medium text-dark-400 mb-4">Event Flow</h3>
+          <div className="overflow-x-auto">
+            <Sankey
+              width={900}
+              height={Math.max(300, sankeyData.nodes.length * 50)}
+              data={sankeyData}
+              nodePadding={40}
+              nodeWidth={10}
+              linkCurvature={0.5}
+              margin={{ top: 20, right: 160, bottom: 20, left: 20 }}
+              node={<SankeyNode x={0} y={0} width={0} height={0} payload={{ name: '' }} />}
+            >
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} />
+            </Sankey>
+          </div>
+        </Card>
+      ) : (
+        <Card className="p-8 text-center">
+          <div className="flex justify-center mb-3">
+            <GitBranch className="w-10 h-10 text-dark-600" />
+          </div>
+          <p className="text-dark-400">No event flow to display yet.</p>
+          <p className="text-dark-500 text-sm mt-2">
+            Define events and set parent relationships to visualize how users flow through your product.
+          </p>
+        </Card>
+      )}
+
+      {/* Event Definitions Table */}
+      <Card className="p-4">
+        <h3 className="text-sm font-medium text-dark-400 mb-4">Event Definitions</h3>
+        {definitions.length === 0 ? (
+          <p className="text-dark-500 text-sm">No event definitions yet. Click "Define Event" to get started.</p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-dark-400 text-left">
+                <th className="pb-2">Name</th>
+                <th className="pb-2">Description</th>
+                <th className="pb-2">Parent</th>
+                <th className="pb-2 text-right">Count</th>
+                <th className="pb-2 text-right w-20"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {definitions.map(def => (
+                <tr key={def.id} className="border-t border-dark-800">
+                  <td className="py-2 text-white font-medium">{def.name}</td>
+                  <td className="py-2 text-dark-300">{def.description || <span className="text-dark-600">&mdash;</span>}</td>
+                  <td className="py-2 text-dark-400">{getParentName(def) || <span className="text-dark-600">&mdash;</span>}</td>
+                  <td className="py-2 text-right text-dark-300">{formatNum(def.count ?? 0)}</td>
+                  <td className="py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <button onClick={() => onEdit(def)} className="p-1 text-dark-500 hover:text-white transition-colors" title="Edit">
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button onClick={() => onDelete(def)} className="p-1 text-dark-500 hover:text-red-400 transition-colors" title="Delete">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function EventsTab() {
+  const [range, setRange] = useState<Range>('30d');
+  const [subTab, setSubTab] = useState<EventSubTab>('flow');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingDef, setEditingDef] = useState<EventDefinition | undefined>();
+  const [deleteTarget, setDeleteTarget] = useState<EventDefinition | null>(null);
+  const [defaultSet, setDefaultSet] = useState(false);
+  const queryClient = useQueryClient();
+
+  const { data: defsData } = useQuery({
+    queryKey: ['pm', 'event-definitions', range],
+    queryFn: () => pmApi.listEventDefinitions({ range }),
+  });
+  const definitions = defsData?.definitions ?? [];
+
+  // Default to graph tab if no dependencies exist.
+  const hasDeps = definitions.some(d => d.parentId);
+  useEffect(() => {
+    if (defsData && !defaultSet) {
+      setSubTab(hasDeps ? 'flow' : 'graph');
+      setDefaultSet(true);
+    }
+  }, [defsData, hasDeps, defaultSet]);
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ['pm', 'event-definitions'] });
+    queryClient.invalidateQueries({ queryKey: ['pm', 'sankey'] });
+  };
+
+  const createMutation = useMutation({
+    mutationFn: (data: { name: string; description: string; parentId?: string | null }) =>
+      pmApi.createEventDefinition(data),
+    onSuccess: () => { toast.success('Event definition created'); invalidate(); setModalOpen(false); },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to create';
+      toast.error(msg);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { name: string; description: string; parentId?: string | null } }) =>
+      pmApi.updateEventDefinition(id, data),
+    onSuccess: () => { toast.success('Event definition updated'); invalidate(); setModalOpen(false); setEditingDef(undefined); },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Failed to update';
+      toast.error(msg);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => pmApi.deleteEventDefinition(id),
+    onSuccess: () => { toast.success('Event definition deleted'); invalidate(); setDeleteTarget(null); },
+    onError: () => toast.error('Failed to delete'),
+  });
+
+  const handleSubmit = (data: { name: string; description: string; parentId?: string | null }) => {
+    if (editingDef) {
+      updateMutation.mutate({ id: editingDef.id, data });
+    } else {
+      createMutation.mutate(data);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <div className="flex items-center gap-4">
+          <h2 className="text-lg font-semibold text-white">Events</h2>
+          <div className="flex gap-1 bg-dark-900/50 border border-dark-800 rounded-lg p-1">
+            {([{ key: 'flow' as const, label: 'Flow' }, { key: 'graph' as const, label: 'Graph' }]).map(t => (
+              <button
+                key={t.key}
+                onClick={() => setSubTab(t.key)}
+                className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                  subTab === t.key ? 'bg-dark-700 text-white' : 'text-dark-400 hover:text-dark-300'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => { setEditingDef(undefined); setModalOpen(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-primary-500 hover:bg-primary-600 text-white rounded-lg transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Define Event
+          </button>
+          <RangeSelector value={range} onChange={setRange} />
+        </div>
+      </div>
+
+      {subTab === 'flow' ? (
+        <FlowSubTab
+          range={range}
+          definitions={definitions}
+          onEdit={(def) => { setEditingDef(def); setModalOpen(true); }}
+          onDelete={(def) => setDeleteTarget(def)}
+        />
+      ) : (
+        <GraphSubTab range={range} />
+      )}
+
+      <EventDefinitionModal
+        open={modalOpen}
+        onClose={() => { setModalOpen(false); setEditingDef(undefined); }}
+        definitions={definitions}
+        existing={editingDef}
+        onSubmit={handleSubmit}
+        loading={createMutation.isPending || updateMutation.isPending}
+      />
+
+      <ConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
+        title="Delete Event Definition"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? Any child events referencing this as a parent will be unlinked.`}
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        loading={deleteMutation.isPending}
+      />
     </div>
   );
 }

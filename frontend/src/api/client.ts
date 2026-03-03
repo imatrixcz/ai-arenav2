@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { AuthResponse, MFARequiredResponse, AuthProviders, ActiveSession, ActivityLogEntry, PasskeyCredential, ImpersonationResponse, TenantMember, TenantDetail, TenantListItem, UserListItem, Message, AboutInfo, SystemLog, ConfigVar, UserDetail, UserMembershipDetail, DeletePreflightResponse, Plan, EntitlementKeyInfo, PublicPlansResponse, CreditBundle, SystemNode, SystemMetric, FinancialTransaction, DailyMetricPoint, IntegrationCheck, APIKey, Webhook, WebhookDelivery, WebhookEventTypeInfo, BrandingConfig, MediaItem, CustomPage, Promotion, EligibleProduct, Announcement, UsageSummary, Invitation, FunnelData, CohortRow, EngagementData, KPIData, CustomEventData, EventTypeSummary } from '../types';
+import type { AuthResponse, MFARequiredResponse, AuthProviders, ActiveSession, ActivityLogEntry, PasskeyCredential, ImpersonationResponse, TenantMember, TenantDetail, TenantListItem, UserListItem, Message, AboutInfo, SystemLog, ConfigVar, UserDetail, UserMembershipDetail, DeletePreflightResponse, Plan, EntitlementKeyInfo, PublicPlansResponse, CreditBundle, SystemNode, SystemMetric, FinancialTransaction, DailyMetricPoint, IntegrationCheck, APIKey, Webhook, WebhookDelivery, WebhookEventTypeInfo, BrandingConfig, MediaItem, CustomPage, Promotion, EligibleProduct, Announcement, UsageSummary, Invitation, FunnelData, CohortRow, EngagementData, KPIData, CustomEventData, EventTypeSummary, EventDefinition, SankeyData } from '../types';
 
 const api = axios.create({
   baseURL: '/api',
@@ -488,6 +488,16 @@ export const pmApi = {
     api.get<CustomEventData>('/admin/pm/events', { params }).then(r => r.data),
   listEventTypes: () =>
     api.get<{ eventTypes: EventTypeSummary[] }>('/admin/pm/events/types').then(r => r.data),
+  listEventDefinitions: (params?: { range?: string }) =>
+    api.get<{ definitions: EventDefinition[] }>('/admin/pm/event-definitions', { params }).then(r => r.data),
+  createEventDefinition: (data: { name: string; description: string; parentId?: string | null }) =>
+    api.post<EventDefinition>('/admin/pm/event-definitions', data).then(r => r.data),
+  updateEventDefinition: (id: string, data: { name: string; description: string; parentId?: string | null }) =>
+    api.put<EventDefinition>(`/admin/pm/event-definitions/${id}`, data).then(r => r.data),
+  deleteEventDefinition: (id: string) =>
+    api.delete(`/admin/pm/event-definitions/${id}`).then(r => r.data),
+  getSankeyData: (params?: { range?: string }) =>
+    api.get<SankeyData>('/admin/pm/event-definitions/sankey', { params }).then(r => r.data),
 };
 
 // --- Telemetry ---
