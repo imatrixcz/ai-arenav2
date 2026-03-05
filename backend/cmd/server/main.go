@@ -152,7 +152,11 @@ func main() {
 		ddClient = datadog.New(cfg.DataDog.APIKey, site, cfg.Environment, cfg.App.Name)
 		defer ddClient.Stop()
 		sysLogger.SetOnLog(ddClient.TrackSyslogEntry)
-		slog.Info("DataDog integration configured", "site", site)
+
+		// Verify end-to-end: validate key, send startup event + heartbeat metric
+		if err := ddClient.Startup(context.Background(), version.Current); err != nil {
+			slog.Warn("DataDog startup verification failed (integration will retry in background)", "error", err)
+		}
 	} else {
 		slog.Warn("DataDog integration not configured", "reason", "missing API key")
 	}

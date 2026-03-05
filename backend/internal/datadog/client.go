@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -31,6 +32,7 @@ type Client struct {
 	site       string // e.g. "us5.datadoghq.com"
 	env        string // e.g. "dev", "prod"
 	appName    string
+	hostname   string
 	httpClient *http.Client
 
 	metricsCh chan metricPoint
@@ -49,20 +51,28 @@ type metricPoint struct {
 
 // ddEvent is a DataDog event (from syslog).
 type ddEvent struct {
-	Title     string   `json:"title"`
-	Text      string   `json:"text"`
-	Priority  string   `json:"priority"`
-	AlertType string   `json:"alert_type"`
-	Tags      []string `json:"tags"`
+	Title          string   `json:"title"`
+	Text           string   `json:"text"`
+	Priority       string   `json:"priority"`
+	AlertType      string   `json:"alert_type"`
+	Tags           []string `json:"tags"`
+	Host           string   `json:"host,omitempty"`
+	SourceTypeName string   `json:"source_type_name,omitempty"`
 }
 
 // New creates a DataDog client and starts background flush goroutines.
 func New(apiKey, site, env, appName string) *Client {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+
 	c := &Client{
 		apiKey:     apiKey,
 		site:       site,
 		env:        env,
 		appName:    appName,
+		hostname:   hostname,
 		httpClient: &http.Client{Timeout: httpTimeout},
 		metricsCh:  make(chan metricPoint, metricsBufferSize),
 		eventsCh:   make(chan ddEvent, eventsBufferSize),
@@ -72,6 +82,50 @@ func New(apiKey, site, env, appName string) *Client {
 	go c.metricsFlushLoop()
 	go c.eventsFlushLoop()
 	return c
+}
+
+// Startup validates the API key, sends a startup event and a heartbeat metric
+// synchronously. Returns an error if DataDog is unreachable or rejects the data.
+// Call this once at server boot to confirm the pipeline works end-to-end.
+func (c *Client) Startup(ctx context.Context, appVersion string) error {
+	// 1. Validate API key
+	if err := c.Validate(ctx); err != nil {
+		return fmt.Errorf("API key validation failed: %w", err)
+	}
+
+	// 2. Send a startup event synchronously
+	evt := ddEvent{
+		Title:          fmt.Sprintf("[startup] %s v%s started", c.appName, appVersion),
+		Text:           fmt.Sprintf("%s version %s started on host %s (env: %s)", c.appName, appVersion, c.hostname, c.env),
+		Priority:       "low",
+		AlertType:      "info",
+		Host:           c.hostname,
+		SourceTypeName: c.appName,
+		Tags: []string{
+			"env:" + c.env,
+			"app:" + c.appName,
+			"version:" + appVersion,
+		},
+	}
+	if err := c.submitEvent(evt); err != nil {
+		return fmt.Errorf("startup event submission failed: %w", err)
+	}
+
+	// 3. Send a heartbeat metric synchronously
+	heartbeat := []metricPoint{{
+		MetricName: "lastsaas.heartbeat",
+		Tags:       []string{"env:" + c.env, "app:" + c.appName},
+		Value:      1,
+		Timestamp:  time.Now().Unix(),
+	}}
+	if err := c.submitMetrics(heartbeat); err != nil {
+		return fmt.Errorf("startup metric submission failed: %w", err)
+	}
+
+	slog.Info("datadog: startup verification complete",
+		"host", c.hostname, "site", c.site,
+		"event", "sent", "metric", "sent")
+	return nil
 }
 
 // Stop gracefully drains buffers and shuts down flush loops.
@@ -117,11 +171,13 @@ func (c *Client) TrackSyslogEntry(entry models.SystemLog) {
 	}
 
 	evt := ddEvent{
-		Title:     fmt.Sprintf("[%s] %s", entry.Severity, truncate(entry.Message, 100)),
-		Text:      entry.Message,
-		Priority:  "normal",
-		AlertType: alertType,
-		Tags:      tags,
+		Title:          fmt.Sprintf("[%s] %s", entry.Severity, truncate(entry.Message, 100)),
+		Text:           entry.Message,
+		Priority:       "normal",
+		AlertType:      alertType,
+		Host:           c.hostname,
+		SourceTypeName: c.appName,
+		Tags:           tags,
 	}
 	select {
 	case c.eventsCh <- evt:
@@ -255,11 +311,16 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 		Timestamp int64   `json:"timestamp"`
 		Value     float64 `json:"value"`
 	}
+	type ddResource struct {
+		Name string `json:"name"`
+		Type string `json:"type"`
+	}
 	type ddSeries struct {
-		Metric string     `json:"metric"`
-		Type   int        `json:"type"`
-		Points []ddPoint  `json:"points"`
-		Tags   []string   `json:"tags"`
+		Metric    string       `json:"metric"`
+		Type      int          `json:"type"`
+		Points    []ddPoint    `json:"points"`
+		Tags      []string     `json:"tags"`
+		Resources []ddResource `json:"resources"`
 	}
 
 	series := make([]ddSeries, 0, len(groups))
@@ -273,6 +334,9 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 			Type:   1, // count
 			Points: ddPts,
 			Tags:   pts[0].Tags,
+			Resources: []ddResource{
+				{Name: c.hostname, Type: "host"},
+			},
 		})
 	}
 
@@ -301,13 +365,13 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 	if err != nil {
 		return err
 	}
-	io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
 	apicounter.DataDogAPICalls.Add(1)
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("datadog metrics API returned status %d", resp.StatusCode)
+		return fmt.Errorf("datadog metrics API returned status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 	return nil
 }
@@ -335,13 +399,13 @@ func (c *Client) submitEvent(evt ddEvent) error {
 	if err != nil {
 		return err
 	}
-	io.Copy(io.Discard, resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 
 	apicounter.DataDogAPICalls.Add(1)
 
 	if resp.StatusCode >= 400 {
-		return fmt.Errorf("datadog events API returned status %d", resp.StatusCode)
+		return fmt.Errorf("datadog events API returned status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
 	return nil
 }
