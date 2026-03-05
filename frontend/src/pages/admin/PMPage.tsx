@@ -423,9 +423,6 @@ function SankeyNode({ x, y, width, height, payload }: {
 }) {
   const count = payload.count ?? 0;
   const pct = payload.pct;
-  const label = pct !== undefined
-    ? `${payload.name}  ${formatNum(count)}  (${pct.toFixed(1)}%)`
-    : `${payload.name}  ${formatNum(count)}`;
   return (
     <g>
       <rect x={x} y={y} width={width} height={height} fill="#6366f1" stroke="#818cf8" strokeWidth={1} rx={3} />
