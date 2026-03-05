@@ -57,6 +57,7 @@ type metricPoint struct {
 	Value      float64
 	Timestamp  int64 // Unix seconds
 	MetricType int   // 1=count, 3=gauge (DataDog v2 series API type codes)
+	Interval   int64 // Required for count/rate metrics: aggregation interval in seconds
 }
 
 // ddEvent is a DataDog event (from syslog).
@@ -172,6 +173,7 @@ func (c *Client) Startup(ctx context.Context, appVersion string) error {
 		Value:      1,
 		Timestamp:  time.Now().Unix(),
 		MetricType: 1,
+		Interval:   10,
 	}}
 	if err := c.submitMetrics(heartbeat); err != nil {
 		return fmt.Errorf("startup metric submission failed: %w", err)
@@ -216,6 +218,7 @@ func (c *Client) TrackTelemetryEvent(event models.TelemetryEvent) {
 		Value:      1,
 		Timestamp:  event.CreatedAt.Unix(),
 		MetricType: 1, // count
+		Interval:   10,
 	}
 	select {
 	case c.metricsCh <- point:
@@ -289,7 +292,7 @@ func (c *Client) TrackHealthSnapshot(metric models.SystemMetric) {
 		{MetricName: pfx + ".disk.used_bytes", Tags: tags, Value: float64(metric.Disk.UsedBytes), Timestamp: now, MetricType: 3},
 		{MetricName: pfx + ".disk.used_percent", Tags: tags, Value: metric.Disk.UsedPercent, Timestamp: now, MetricType: 3},
 		// HTTP
-		{MetricName: pfx + ".http.requests", Tags: tags, Value: float64(metric.HTTP.RequestCount), Timestamp: now, MetricType: 1},
+		{MetricName: pfx + ".http.requests", Tags: tags, Value: float64(metric.HTTP.RequestCount), Timestamp: now, MetricType: 1, Interval: 60},
 		{MetricName: pfx + ".http.latency.p50", Tags: tags, Value: metric.HTTP.LatencyP50, Timestamp: now, MetricType: 3},
 		{MetricName: pfx + ".http.latency.p95", Tags: tags, Value: metric.HTTP.LatencyP95, Timestamp: now, MetricType: 3},
 		{MetricName: pfx + ".http.latency.p99", Tags: tags, Value: metric.HTTP.LatencyP99, Timestamp: now, MetricType: 3},
@@ -302,8 +305,8 @@ func (c *Client) TrackHealthSnapshot(metric models.SystemMetric) {
 		{MetricName: pfx + ".mongo.connections", Tags: tags, Value: float64(metric.Mongo.CurrentConnections), Timestamp: now, MetricType: 3},
 		{MetricName: pfx + ".mongo.available_connections", Tags: tags, Value: float64(metric.Mongo.AvailableConnections), Timestamp: now, MetricType: 3},
 		// Network
-		{MetricName: pfx + ".network.bytes_sent", Tags: tags, Value: float64(metric.Network.BytesSent), Timestamp: now, MetricType: 1},
-		{MetricName: pfx + ".network.bytes_recv", Tags: tags, Value: float64(metric.Network.BytesRecv), Timestamp: now, MetricType: 1},
+		{MetricName: pfx + ".network.bytes_sent", Tags: tags, Value: float64(metric.Network.BytesSent), Timestamp: now, MetricType: 1, Interval: 60},
+		{MetricName: pfx + ".network.bytes_recv", Tags: tags, Value: float64(metric.Network.BytesRecv), Timestamp: now, MetricType: 1, Interval: 60},
 	}
 
 	// HTTP status code breakdown
@@ -317,6 +320,7 @@ func (c *Client) TrackHealthSnapshot(metric models.SystemMetric) {
 			Value:      float64(count),
 			Timestamp:  now,
 			MetricType: 1,
+			Interval:   60,
 		})
 	}
 
@@ -331,17 +335,21 @@ func (c *Client) TrackHealthSnapshot(metric models.SystemMetric) {
 			Value:      float64(count),
 			Timestamp:  now,
 			MetricType: 1,
+			Interval:   60,
 		})
 	}
 
+	enqueued := 0
 	for _, g := range gauges {
 		select {
 		case c.metricsCh <- g:
+			enqueued++
 		default:
 			slog.Warn("datadog: metrics buffer full, dropping health metrics")
-			return
+			break
 		}
 	}
+	slog.Info("datadog: health snapshot enqueued", "metrics", enqueued)
 }
 
 // TrackIntegrationChecks forwards integration health check results as DataDog service checks.
@@ -588,6 +596,7 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 	type ddSeries struct {
 		Metric    string       `json:"metric"`
 		Type      int          `json:"type"`
+		Interval  int64        `json:"interval,omitempty"`
 		Points    []ddPoint    `json:"points"`
 		Tags      []string     `json:"tags"`
 		Resources []ddResource `json:"resources"`
@@ -604,10 +613,11 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 			metricType = 1 // default to count
 		}
 		series = append(series, ddSeries{
-			Metric: pts[0].MetricName,
-			Type:   metricType,
-			Points: ddPts,
-			Tags:   pts[0].Tags,
+			Metric:   pts[0].MetricName,
+			Type:     metricType,
+			Interval: pts[0].Interval,
+			Points:   ddPts,
+			Tags:     pts[0].Tags,
 			Resources: []ddResource{
 				{Name: c.hostname, Type: "host"},
 			},
@@ -647,6 +657,7 @@ func (c *Client) submitMetrics(points []metricPoint) error {
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("datadog metrics API returned status %d: %s", resp.StatusCode, truncate(string(respBody), 200))
 	}
+	slog.Info("datadog: metrics submitted", "series", len(series), "points", len(points), "status", resp.StatusCode, "response", truncate(string(respBody), 200))
 	return nil
 }
 

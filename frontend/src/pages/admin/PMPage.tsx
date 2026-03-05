@@ -16,7 +16,7 @@ import {
 import { toast } from 'sonner';
 
 type Tab = 'funnel' | 'kpis' | 'retention' | 'engagement' | 'events';
-type Range = '7d' | '30d' | '90d' | '1y';
+type Range = 'today' | '7d' | '30d' | '90d' | '1y';
 
 const tooltipStyle = { backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px' };
 const tooltipLabelStyle = { color: '#94a3b8' };
@@ -32,7 +32,7 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
 
   return (
     <div className="flex gap-1 bg-dark-900/50 border border-dark-800 rounded-lg p-1">
-      {(['7d', '30d', '90d', '1y'] as const).map(r => (
+      {(['today', '7d', '30d', '90d', '1y'] as const).map(r => (
         <button
           key={r}
           onClick={() => handleClick(r)}
@@ -40,7 +40,7 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
             visual === r ? 'bg-dark-700 text-white' : 'text-dark-400 hover:text-dark-300'
           }`}
         >
-          {r}
+          {r === 'today' ? 'Today' : r}
         </button>
       ))}
     </div>
@@ -50,7 +50,7 @@ function RangeSelector({ value, onChange }: { value: Range; onChange: (r: Range)
 // Bin daily data points into weekly or monthly buckets for large date ranges.
 function binChartData(points: { date: string; value: number }[], range: Range): { date: string; value: number }[] {
   if (!points || points.length === 0) return points;
-  if (range === '7d' || range === '30d') return points;
+  if (range === 'today' || range === '7d' || range === '30d') return points;
 
   const buckets = new Map<string, number>();
   for (const p of points) {

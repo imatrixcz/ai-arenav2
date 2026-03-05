@@ -29,6 +29,9 @@ func parsePMTimeRange(r *http.Request) (time.Time, time.Time) {
 	now := time.Now()
 	rangeParam := r.URL.Query().Get("range")
 	switch rangeParam {
+	case "today":
+		y, m, d := now.Date()
+		return time.Date(y, m, d, 0, 0, 0, 0, now.Location()), now
 	case "7d":
 		return now.AddDate(0, 0, -7), now
 	case "90d":
