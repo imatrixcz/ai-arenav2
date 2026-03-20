@@ -56,6 +56,8 @@ const AdminPromotionsPage = lazy(() => import('./pages/admin/PromotionsPage'));
 const AdminAnnouncementsPage = lazy(() => import('./pages/admin/AnnouncementsPage'));
 const AdminRootMembersPage = lazy(() => import('./pages/admin/RootMembersPage'));
 const AdminPMPage = lazy(() => import('./pages/admin/PMPage'));
+const AdminAIModelsPage = lazy(() => import('./pages/admin/AIarena/AdminAIModels'));
+const AdminBenchmarksPage = lazy(() => import('./pages/admin/AIarena/AdminBenchmarks'));
 
 // Public pages
 import LandingPage from './pages/public/LandingPage';
@@ -200,6 +202,8 @@ export default function App() {
                         <Route path="api" element={<Suspense fallback={<LazyFallback />}><AdminAPIPage /></Suspense>} />
                         <Route path="branding" element={<Suspense fallback={<LazyFallback />}><AdminBrandingPage /></Suspense>} />
                         <Route path="about" element={<Suspense fallback={<LazyFallback />}><AdminAboutPage /></Suspense>} />
+                        <Route path="aiarena/models" element={<Suspense fallback={<LazyFallback />}><AdminAIModelsPage /></Suspense>} />
+                        <Route path="aiarena/benchmarks" element={<Suspense fallback={<LazyFallback />}><AdminBenchmarksPage /></Suspense>} />
                       </Route>
                     </Route>
 
