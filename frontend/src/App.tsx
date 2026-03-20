@@ -63,6 +63,7 @@ import CustomPage from './pages/public/CustomPage';
 
 // AI Arena pages (lazy-loaded)
 const ModelsListPage = lazy(() => import('./pages/public/aiarena/ModelsList'));
+const ModelDetailPage = lazy(() => import('./pages/public/aiarena/ModelDetail'));
 const ModelComparisonPage = lazy(() => import('./pages/public/aiarena/ModelComparison'));
 const LeaderboardPage = lazy(() => import('./pages/public/aiarena/Leaderboard'));
 const BattlePage = lazy(() => import('./pages/public/aiarena/Battle'));
@@ -141,7 +142,7 @@ export default function App() {
 
                     {/* AI Arena Public Routes */}
                     <Route path="/models" element={<Suspense fallback={<LazyFallback />}><ModelsListPage /></Suspense>} />
-                    <Route path="/models/:slug" element={<Suspense fallback={<LazyFallback />}><ModelsListPage /></Suspense>} />
+                    <Route path="/models/:slug" element={<Suspense fallback={<LazyFallback />}><ModelDetailPage /></Suspense>} />
                     <Route path="/compare/:slugs" element={<Suspense fallback={<LazyFallback />}><ModelComparisonPage /></Suspense>} />
                     <Route path="/leaderboard" element={<Suspense fallback={<LazyFallback />}><LeaderboardPage /></Suspense>} />
                     <Route path="/battle" element={<Suspense fallback={<LazyFallback />}><BattlePage /></Suspense>} />
