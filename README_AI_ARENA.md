@@ -168,9 +168,9 @@ APP_NAME=AI Arena
 7. [x] Registrace rout v routeru
 
 ### Data Migration
-1. [ ] Export z WordPress MySQL
-2. [ ] Transformace dat
-3. [ ] Import do MongoDB
+1. [x] Export z WordPress MySQL - `scripts/migrate-wordpress-to-mongodb.js`
+2. [x] Transformace dat
+3. [x] Import do MongoDB
 4. [ ] Validace integrity
 
 ### Testing & Deployment
@@ -240,11 +240,41 @@ Upstream: https://github.com/jonradoff/lastsaas (fork)
 
 ## 🎯 Další kroky
 
-1. [ ] Admin panel pro správu modelů/benchmarků
-2. [ ] Export dat z WordPress MySQL
-3. [ ] Transformace a import do MongoDB
-4. [ ] Testování (unit + integration)
-5. [ ] Produční deployment
+1. [ ] Opravit build errors (Go 1.25 required) - backend potřebuje novější verzi Go
+2. [ ] Testování (unit + integration tests)
+3. [ ] Produční deployment
+4. [ ] Spustit migraci dat: `node scripts/migrate-wordpress-to-mongodb.js`
+
+---
+
+## 🔄 Migrace z WordPress
+
+Použijte připravený skript pro migraci dat z WordPress do MongoDB:
+
+```bash
+# Nainstalujte závislosti
+npm install mysql2 mongodb
+
+# Nastavte proměnné prostředí (nebo upravte skript)
+export WP_DB_HOST=localhost
+export WP_DB_USER=wordpress
+export WP_DB_PASSWORD=wordpress
+export WP_DB_NAME=wordpress
+export MONGODB_URI=mongodb://localhost:27017/aiarena
+
+# Spusťte migraci
+node scripts/migrate-wordpress-to-mongodb.js
+```
+
+Skript provede:
+1. Export AI modelů z `wp_posts` (post_type = 'ai_model')
+2. Export promptů z `wp_posts` (post_type = 'ai_prompt')
+3. Export hlasování z `wp_ai_votes`
+4. Transformaci dat do MongoDB formátu
+5. Import do MongoDB s vytvořením indexů
+6. Vytvoření mappingu WordPress ID → MongoDB ID
+
+**Poznámka:** Pro správnou migraci je potřeba, aby Docker s MongoDB běžel na localhost:27017.
 
 ---
 
