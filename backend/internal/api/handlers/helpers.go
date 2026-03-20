@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -27,6 +28,25 @@ func respondWithJSON(w http.ResponseWriter, status int, payload interface{}) {
 
 func respondWithError(w http.ResponseWriter, status int, message string) {
 	respondWithJSON(w, status, ErrorResponse{Error: message})
+}
+
+func respondJSON(w http.ResponseWriter, status int, payload interface{}) {
+	respondWithJSON(w, status, payload)
+}
+
+func respondError(w http.ResponseWriter, status int, message string) {
+	respondWithError(w, status, message)
+}
+
+func parseInt(s string, defaultValue int) int {
+	if s == "" {
+		return defaultValue
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultValue
+	}
+	return n
 }
 
 func generateRandomToken() string {
