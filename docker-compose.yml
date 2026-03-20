@@ -24,6 +24,7 @@ services:
       - aiarena
     volumes:
       - ./uploads:/app/uploads
+      - ./backend/config/dev.yaml:/app/config/dev.yaml:ro
 
   mongodb:
     image: mongo:7
@@ -33,7 +34,6 @@ services:
       - "27017:27017"
     volumes:
       - mongodb_data:/data/db
-      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
     networks:
       - aiarena
 
