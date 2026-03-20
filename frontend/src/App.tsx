@@ -67,6 +67,7 @@ const ModelDetailPage = lazy(() => import('./pages/public/aiarena/ModelDetail'))
 const ModelComparisonPage = lazy(() => import('./pages/public/aiarena/ModelComparison'));
 const LeaderboardPage = lazy(() => import('./pages/public/aiarena/Leaderboard'));
 const BattlePage = lazy(() => import('./pages/public/aiarena/Battle'));
+const PromptsGalleryPage = lazy(() => import('./pages/public/aiarena/PromptsGallery'));
 
 function LazyFallback() {
   return (
@@ -146,6 +147,7 @@ export default function App() {
                     <Route path="/compare/:slugs" element={<Suspense fallback={<LazyFallback />}><ModelComparisonPage /></Suspense>} />
                     <Route path="/leaderboard" element={<Suspense fallback={<LazyFallback />}><LeaderboardPage /></Suspense>} />
                     <Route path="/battle" element={<Suspense fallback={<LazyFallback />}><BattlePage /></Suspense>} />
+                    <Route path="/prompts" element={<Suspense fallback={<LazyFallback />}><PromptsGalleryPage /></Suspense>} />
 
                     {/* Public custom pages */}
                     <Route path="/p/:slug" element={<CustomPage />} />
