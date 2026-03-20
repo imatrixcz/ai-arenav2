@@ -63,8 +63,10 @@ Kompletní přepis AI Arena z WordPress pluginu na standalone aplikaci postaveno
 #### Komponenty
 - **ModelComparison** - hlavní stránka porovnání
 - **ModelsList** - seznam všech modelů (grid/list view)
+- **ModelDetail** - detail modelu s ELO a benchmarky
 - **Leaderboard** - ELO žebříček (7 modalit)
 - **Battle** - blind battle interface
+- **PromptsGallery** - galerie promptů
 - **ModelCard** - karta modelu s drag & drop, 3-dot menu
 - **BenchmarkSection** - skládací sekce benchmarků
 - **AddModelModal** - modal pro přidání modelů s filtrem
@@ -158,10 +160,10 @@ APP_NAME=AI Arena
 
 ### Frontend
 1. [x] Vytvořit ModelListPage (seznam všech modelů)
-2. [ ] Vytvořit ModelDetailPage (detail modelu)
+2. [x] Vytvořit ModelDetailPage (detail modelu)
 3. [x] Vytvořit LeaderboardPage (ELO leaderboard)
 4. [x] Vytvořit BattlePage (blind battle interface)
-5. [ ] Vytvořit PromptsPage (galerie promptů)
+5. [x] Vytvořit PromptsPage (galerie promptů)
 6. [ ] Admin panel pro správu modelů/benchmarků
 7. [x] Registrace rout v routeru
 
@@ -205,8 +207,10 @@ ai-arenav2/
 │       └── pages/public/aiarena/
 │           ├── ModelComparison.tsx
 │           ├── ModelsList.tsx
+│           ├── ModelDetail.tsx
 │           ├── Leaderboard.tsx
 │           ├── Battle.tsx
+│           ├── PromptsGallery.tsx
 │           └── components/
 │               ├── ModelCard.tsx
 │               ├── BenchmarkSection.tsx
@@ -232,11 +236,11 @@ Upstream: https://github.com/jonradoff/lastsaas (fork)
 
 ## 🎯 Další kroky
 
-1. Dokončit zbývající frontend stránky
-2. Nastavit routing v App.tsx
-3. Testovací data (seed)
-4. Migrace z WordPress
-5. Produční deployment
+1. [ ] Admin panel pro správu modelů/benchmarků
+2. [ ] Export dat z WordPress MySQL
+3. [ ] Transformace a import do MongoDB
+4. [ ] Testování (unit + integration)
+5. [ ] Produční deployment
 
 ---
 
