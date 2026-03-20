@@ -1,0 +1,235 @@
+# AI Arena v2
+
+Kompletní přepis AI Arena z WordPress pluginu na standalone aplikaci postavenou na LastSaaS boilerplate.
+
+## 🏗️ Architektura
+
+### Backend (Go + MongoDB)
+- **Framework:** LastSaaS (Go 1.25, Gorilla Mux, MongoDB)
+- **Database:** MongoDB 7 s Redis cache
+- **Auth:** JWT (z LastSaaS)
+- **Deployment:** Docker Compose (vše v jednom kontejneru)
+
+### Frontend (React + TypeScript)
+- **Framework:** React 19, TypeScript, Vite 7
+- **Styling:** Tailwind CSS 4 (z LastSaaS)
+- **Charts:** Recharts (z LastSaaS)
+
+## ✅ Hotovo
+
+### Backend
+
+#### Modely
+- `AIModel` - 346+ AI modelů s kompletními daty
+- `Benchmark` - benchmarky a kategorie
+- `BenchmarkScore` - skóre pro každý model
+- `Prompt` - prompty s model outputs (kód, obrázky, video, audio)
+- `Vote` - hlasování v battle, ELO historie
+- `OpenRouterSyncLog` - logy synchronizace
+
+#### API Endpointy
+
+**Public (bez auth):**
+- `GET /models` - seznam modelů s filtry
+- `GET /models/:slug` - detail modelu
+- `GET /models/compare?slugs=` - porovnání modelů
+- `GET /providers` - seznam providerů
+- `GET /benchmarks` - seznam benchmarků
+- `GET /benchmarks/:slug/scores` - skóre pro benchmark
+- `GET /leaderboard` - ELO leaderboard
+- `GET /battle-pair` - náhodný battle
+- `GET /prompts` - seznam promptů
+- `GET /prompts/:slug` - detail promptu
+
+**Protected (s auth):**
+- `POST /vote` - hlasování
+- `GET /user/votes` - historie hlasování
+
+**Admin (root tenant + admin role):**
+- CRUD pro modely, benchmarky, skóre, prompty
+- `POST /elo/recalculate` - přepočet ELO
+- `POST /sync/openrouter` - sync z OpenRouter
+- `GET /sync/logs` - logy synců
+- `GET /sync/status` - status syncu
+
+#### OpenRouter Sync
+- Append-only (nepřepisuje ručně upravené modely)
+- Denní sync v pozadí
+- Logování všech operací
+- Žádný API klíč potřeba - pouze GET
+
+### Frontend
+
+#### Komponenty
+- **ModelComparison** - hlavní stránka porovnání
+- **ModelCard** - karta modelu s drag & drop, 3-dot menu
+- **BenchmarkSection** - skládací sekce benchmarků
+- **AddModelModal** - modal pro přidání modelů s filtrem
+
+#### Features implementované
+- ✅ Drag & drop pro změnu pořadí karet
+- ✅ BEST zvýraznění (zelená pro nejlepší hodnoty)
+- ✅ 3-dot menu (Add to Favorites, Replace, Delete)
+- ✅ Provider filter chips v modalu
+- ✅ Multi-select checkboxy
+- ✅ Architecture modality chips s barvami
+- ✅ Collapsible benchmark sekce
+- ✅ ELO ratings v patičce karty
+
+## 🐳 Docker Setup
+
+```bash
+# Start vše
+./scripts/setup.sh
+docker-compose up -d
+
+# Nebo manuálně
+docker-compose up -d
+```
+
+**Služby:**
+- `app` - Go backend + React frontend (port 4290)
+- `mongodb` - MongoDB 7 (port 27017)
+- `redis` - Redis cache (port 6379)
+- `mongo-express` - MongoDB UI (port 8081)
+
+## 📊 Datový Model
+
+### AIModel
+```typescript
+{
+  id: string;
+  slug: string;
+  name: string;
+  provider: string;
+  context_length: number;
+  max_output_tokens: number;
+  pricing: {
+    prompt: number;
+    completion: number;
+    image: number;
+    tiers?: Array<{
+      threshold: number;
+      prompt_price: number;
+      completion_price: number;
+      label: string;
+    }>;
+  };
+  modalities: string[]; // text, image, video, file, audio
+  elo_ratings: {
+    global: number;
+    code: number;
+    image: number;
+    video: number;
+    audio: number;
+    text: number;
+    vision: number;
+  };
+  is_moderated: boolean;
+  manual_override: boolean; // ochrana před sync
+  source: 'openrouter' | 'manual';
+}
+```
+
+## 🔧 Konfigurace
+
+`.env`:
+```bash
+DATABASE_NAME=aiarena
+MONGODB_URI=mongodb://localhost:27017
+REDIS_URI=localhost:6379
+JWT_ACCESS_SECRET=changeme
+JWT_REFRESH_SECRET=changeme
+FRONTEND_URL=http://localhost:4290
+APP_NAME=AI Arena
+```
+
+## 🚧 Remaining Tasks
+
+### Backend
+1. [ ] Opravit build errors (Go 1.25 required)
+2. [ ] Přidat MongoDB schemata validace
+3. [ ] Redis cache pro leaderboard
+4. [ ] Rate limiting pro battle/votes
+5. [ ] ELO výpočetní engine (background worker)
+
+### Frontend
+1. [ ] Vytvořit ModelListPage (seznam všech modelů)
+2. [ ] Vytvořit ModelDetailPage (detail modelu)
+3. [ ] Vytvořit LeaderboardPage (ELO leaderboard)
+4. [ ] Vytvořit BattlePage (blind battle interface)
+5. [ ] Vytvořit PromptsPage (galerie promptů)
+6. [ ] Admin panel pro správu modelů/benchmarků
+7. [ ] Registrace rout v routeru
+
+### Data Migration
+1. [ ] Export z WordPress MySQL
+2. [ ] Transformace dat
+3. [ ] Import do MongoDB
+4. [ ] Validace integrity
+
+### Testing & Deployment
+1. [ ] Unit testy
+2. [ ] Integration testy
+3. [ ] Produční build
+4. [ ] Deployment na server
+
+## 📁 Struktura
+
+```
+ai-arenav2/
+├── backend/
+│   ├── cmd/
+│   │   ├── server/           # HTTP server
+│   │   └── lastsaas/         # CLI tool
+│   ├── internal/
+│   │   ├── api/handlers/
+│   │   │   ├── ai_models.go  # AI Arena handléři
+│   │   │   ├── benchmarks.go
+│   │   │   ├── leaderboard.go
+│   │   │   ├── prompts.go
+│   │   │   └── openrouter.go
+│   │   └── models/
+│   │       ├── ai_model.go
+│   │       ├── benchmark.go
+│   │       ├── prompt.go
+│   │       ├── vote.go
+│   │       └── openrouter.go
+├── frontend/
+│   └── src/
+│       ├── api/aiarena.ts    # API client
+│       ├── types/aiarena.ts  # TypeScript types
+│       └── pages/public/aiarena/
+│           ├── ModelComparison.tsx
+│           └── components/
+│               ├── ModelCard.tsx
+│               ├── BenchmarkSection.tsx
+│               └── AddModelModal.tsx
+├── docker-compose.yml
+└── README.md
+```
+
+## 🔗 Repozitář
+
+https://github.com/imatrixcz/ai-arenav2
+
+Upstream: https://github.com/jonradoff/lastsaas (fork)
+
+## 📝 Poznámky
+
+- **Multi-tenancy:** Zatím nepoužíváme - LastSaaS tenanty necháváme ale nepoužíváme
+- **Billing:** Ponecháno z LastSaaS ale neaktivováno - pro budoucí použití
+- **Cache:** Redis připraven ale zatím neimplementován
+- **OpenRouter:** Sync funguje bez API klíče - pouze GET na veřejné API
+
+## 🎯 Další kroky
+
+1. Dokončit zbývající frontend stránky
+2. Nastavit routing v App.tsx
+3. Testovací data (seed)
+4. Migrace z WordPress
+5. Produční deployment
+
+---
+
+**Poslední update:** 2026-03-20
