@@ -62,6 +62,9 @@ Kompletní přepis AI Arena z WordPress pluginu na standalone aplikaci postaveno
 
 #### Komponenty
 - **ModelComparison** - hlavní stránka porovnání
+- **ModelsList** - seznam všech modelů (grid/list view)
+- **Leaderboard** - ELO žebříček (7 modalit)
+- **Battle** - blind battle interface
 - **ModelCard** - karta modelu s drag & drop, 3-dot menu
 - **BenchmarkSection** - skládací sekce benchmarků
 - **AddModelModal** - modal pro přidání modelů s filtrem
@@ -154,13 +157,13 @@ APP_NAME=AI Arena
 5. [ ] ELO výpočetní engine (background worker)
 
 ### Frontend
-1. [ ] Vytvořit ModelListPage (seznam všech modelů)
+1. [x] Vytvořit ModelListPage (seznam všech modelů)
 2. [ ] Vytvořit ModelDetailPage (detail modelu)
-3. [ ] Vytvořit LeaderboardPage (ELO leaderboard)
-4. [ ] Vytvořit BattlePage (blind battle interface)
+3. [x] Vytvořit LeaderboardPage (ELO leaderboard)
+4. [x] Vytvořit BattlePage (blind battle interface)
 5. [ ] Vytvořit PromptsPage (galerie promptů)
 6. [ ] Admin panel pro správu modelů/benchmarků
-7. [ ] Registrace rout v routeru
+7. [x] Registrace rout v routeru
 
 ### Data Migration
 1. [ ] Export z WordPress MySQL
@@ -201,10 +204,15 @@ ai-arenav2/
 │       ├── types/aiarena.ts  # TypeScript types
 │       └── pages/public/aiarena/
 │           ├── ModelComparison.tsx
+│           ├── ModelsList.tsx
+│           ├── Leaderboard.tsx
+│           ├── Battle.tsx
 │           └── components/
 │               ├── ModelCard.tsx
 │               ├── BenchmarkSection.tsx
 │               └── AddModelModal.tsx
+├── scripts/
+│   └── seed-data.js          # MongoDB seed data
 ├── docker-compose.yml
 └── README.md
 ```
