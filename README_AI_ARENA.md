@@ -81,22 +81,62 @@ Kompletní přepis AI Arena z WordPress pluginu na standalone aplikaci postaveno
 - ✅ Collapsible benchmark sekce
 - ✅ ELO ratings v patičce karty
 
-## 🐳 Docker Setup
+## 🚀 Quick Start
+
+### Prerequisites
+- Docker & Docker Compose
+- Node.js 20+ (for local frontend development)
+- Go 1.23+ (for local backend development)
+
+### Run with Docker (Recommended)
 
 ```bash
-# Start vše
-./scripts/setup.sh
-docker-compose up -d
+# Clone repository
+git clone https://github.com/imatrixcz/ai-arenav2.git
+cd ai-arenav2
 
-# Nebo manuálně
+# Start all services with seed data
+./start-dev.sh
+
+# Or manually:
 docker-compose up -d
+# Wait 5 seconds for MongoDB to start
+docker cp scripts/seed-data.js aiarenav2-mongodb:/tmp/
+docker exec aiarenav2-mongodb mongosh aiarena /tmp/seed-data.js
 ```
 
-**Služby:**
-- `app` - Go backend + React frontend (port 4290)
-- `mongodb` - MongoDB 7 (port 27017)
-- `redis` - Redis cache (port 6379)
-- `mongo-express` - MongoDB UI (port 8081)
+**Access points:**
+- 🌐 **Application:** http://localhost:4290
+- 🗄️ **MongoDB:** mongodb://localhost:27017
+- 🎨 **MongoDB UI:** http://localhost:8081 (admin/admin)
+- 💾 **Redis:** redis://localhost:6379
+
+### Run Locally (Development)
+
+```bash
+# Terminal 1: Start MongoDB & Redis
+docker-compose up -d mongodb redis
+
+# Terminal 2: Run backend
+cd backend
+cp config/dev.example.yaml config/dev.yaml
+# Edit config/dev.yaml with your settings
+go run ./cmd/server
+
+# Terminal 3: Run frontend
+cd frontend
+npm install
+npm run dev
+```
+
+## 🐳 Docker Services
+
+| Service | Port | Description |
+|---------|------|-------------|
+| `app` | 4290 | Go backend + React frontend |
+| `mongodb` | 27017 | MongoDB 7 database |
+| `redis` | 6379 | Redis cache |
+| `mongo-express` | 8081 | MongoDB web UI (admin/admin) |
 
 ## 📊 Datový Model
 
