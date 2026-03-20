@@ -164,7 +164,7 @@ APP_NAME=AI Arena
 3. [x] Vytvořit LeaderboardPage (ELO leaderboard)
 4. [x] Vytvořit BattlePage (blind battle interface)
 5. [x] Vytvořit PromptsPage (galerie promptů)
-6. [ ] Admin panel pro správu modelů/benchmarků
+6. [x] Admin panel pro správu modelů/benchmarků
 7. [x] Registrace rout v routeru
 
 ### Data Migration
@@ -204,17 +204,21 @@ ai-arenav2/
 │   └── src/
 │       ├── api/aiarena.ts    # API client
 │       ├── types/aiarena.ts  # TypeScript types
-│       └── pages/public/aiarena/
-│           ├── ModelComparison.tsx
-│           ├── ModelsList.tsx
-│           ├── ModelDetail.tsx
-│           ├── Leaderboard.tsx
-│           ├── Battle.tsx
-│           ├── PromptsGallery.tsx
-│           └── components/
-│               ├── ModelCard.tsx
-│               ├── BenchmarkSection.tsx
-│               └── AddModelModal.tsx
+│       └── pages/
+│           ├── public/aiarena/
+│           │   ├── ModelComparison.tsx
+│           │   ├── ModelsList.tsx
+│           │   ├── ModelDetail.tsx
+│           │   ├── Leaderboard.tsx
+│           │   ├── Battle.tsx
+│           │   ├── PromptsGallery.tsx
+│           │   └── components/
+│           │       ├── ModelCard.tsx
+│           │       ├── BenchmarkSection.tsx
+│           │       └── AddModelModal.tsx
+│           └── admin/AIarena/
+│               ├── AdminAIModels.tsx
+│               └── AdminBenchmarks.tsx
 ├── scripts/
 │   └── seed-data.js          # MongoDB seed data
 ├── docker-compose.yml
