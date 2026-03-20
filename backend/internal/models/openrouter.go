@@ -14,16 +14,19 @@ type OpenRouterSyncLog struct {
 	CompletedAt *time.Time         `bson:"completed_at,omitempty" json:"completed_at,omitempty"`
 
 	// Statistics
-	Stats struct {
-		ModelsTotal     int      `bson:"models_total" json:"models_total"`
-		ModelsNew       int      `bson:"models_new" json:"models_new"`
-		ModelsUpdated   int      `bson:"models_updated" json:"models_updated"`
-		ModelsUnchanged int      `bson:"models_unchanged" json:"models_unchanged"`
-		Errors          []string `bson:"errors" json:"errors"`
-	} `bson:"stats" json:"stats"`
+	Stats OpenRouterSyncLogStats `bson:"stats" json:"stats"`
 
 	CreatedBy primitive.ObjectID `bson:"created_by" json:"created_by"`
 	CreatedAt time.Time          `bson:"created_at" json:"created_at"`
+}
+
+// OpenRouterSyncLogStats represents sync statistics
+type OpenRouterSyncLogStats struct {
+	ModelsTotal     int      `bson:"models_total" json:"models_total"`
+	ModelsNew       int      `bson:"models_new" json:"models_new"`
+	ModelsUpdated   int      `bson:"models_updated" json:"models_updated"`
+	ModelsUnchanged int      `bson:"models_unchanged" json:"models_unchanged"`
+	Errors          []string `bson:"errors" json:"errors"`
 }
 
 // TableName returns the collection name

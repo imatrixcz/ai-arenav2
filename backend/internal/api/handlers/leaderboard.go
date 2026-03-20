@@ -7,16 +7,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gorilla/mux"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/jonradoff/lastsaas/backend/internal/models"
+	"lastsaas/internal/models"
 )
 
 // GetLeaderboard handles GET /api/leaderboard
-func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	modality := r.URL.Query().Get("modality")
@@ -24,8 +23,8 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		modality = "global"
 	}
 
-	page := parseInt(r.URL.Query().Get("page"), 1)
-	perPage := parseInt(r.URL.Query().Get("per_page"), 50)
+	page := atoi(r.URL.Query().Get("page"), 1)
+	perPage := atoi(r.URL.Query().Get("per_page"), 50)
 
 	// Validate modality
 	validModalities := []string{"global", "code", "image", "video", "audio", "text", "vision"}
@@ -53,7 +52,7 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		SetLimit(int64(perPage)).
 		SetSort(bson.M{sortField: -1})
 
-	cursor, err := h.DB.Collection("ai_models").Find(ctx,
+	cursor, err := h.DB.Database.Collection("ai_models").Find(ctx,
 		bson.M{"is_active": true}, findOptions)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch leaderboard")
@@ -61,8 +60,8 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cursor.Close(ctx)
 
-	var models []models.AIModel
-	if err = cursor.All(ctx, &models); err != nil {
+	var aiModels []models.AIModel
+	if err = cursor.All(ctx, &aiModels); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to decode models")
 		return
 	}
@@ -74,8 +73,8 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 		Score float64 `json:"score"`
 	}
 
-	entries := make([]LeaderboardEntry, len(models))
-	for i, m := range models {
+	entries := make([]LeaderboardEntry, len(aiModels))
+	for i, m := range aiModels {
 		entries[i] = LeaderboardEntry{
 			AIModel: m,
 			Rank:    skip + i + 1,
@@ -94,7 +93,7 @@ func (h *Handler) GetLeaderboard(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetBattlePair handles GET /api/battle-pair
-func (h *Handler) GetBattlePair(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetBattlePair(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	modality := r.URL.Query().Get("modality")
@@ -106,7 +105,7 @@ func (h *Handler) GetBattlePair(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var prompt models.Prompt
-	err := h.DB.Collection("prompts").FindOne(ctx, promptFilter).Decode(&prompt)
+	err := h.DB.Database.Collection("prompts").FindOne(ctx, promptFilter).Decode(&prompt)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "No prompts available")
 		return
@@ -134,8 +133,8 @@ func (h *Handler) GetBattlePair(w http.ResponseWriter, r *http.Request) {
 
 	// Fetch model details
 	var modelADetails, modelBDetails models.AIModel
-	h.DB.Collection("ai_models").FindOne(ctx, bson.M{"_id": modelA}).Decode(&modelADetails)
-	h.DB.Collection("ai_models").FindOne(ctx, bson.M{"_id": modelB}).Decode(&modelBDetails)
+	h.DB.Database.Collection("ai_models").FindOne(ctx, bson.M{"_id": modelA}).Decode(&modelADetails)
+	h.DB.Database.Collection("ai_models").FindOne(ctx, bson.M{"_id": modelB}).Decode(&modelBDetails)
 
 	// Get outputs for these models
 	var outputA, outputB models.PromptOutput
@@ -193,7 +192,7 @@ func (h *Handler) GetBattlePair(w http.ResponseWriter, r *http.Request) {
 }
 
 // SubmitVote handles POST /api/vote
-func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get user from context (set by auth middleware)
@@ -227,7 +226,7 @@ func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if user already voted on this prompt
-	existingCount, _ := h.DB.Collection("votes").CountDocuments(ctx, bson.M{
+	existingCount, _ := h.DB.Database.Collection("votes").CountDocuments(ctx, bson.M{
 		"prompt_id": promptID,
 		"user_id":   userID,
 	})
@@ -239,7 +238,7 @@ func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 
 	// Get prompt modality
 	var prompt models.Prompt
-	h.DB.Collection("prompts").FindOne(ctx, bson.M{"_id": promptID}).Decode(&prompt)
+	h.DB.Database.Collection("prompts").FindOne(ctx, bson.M{"_id": promptID}).Decode(&prompt)
 
 	// Create vote
 	vote := models.Vote{
@@ -251,10 +250,10 @@ func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 		WinnerID:  winnerID,
 		VoteType:  req.VoteType,
 		Modality:  prompt.Modality,
-		CreatedAt: primitive.NewDateTimeFromTime(time.Now()),
+		CreatedAt: time.Now(),
 	}
 
-	_, err := h.DB.Collection("votes").InsertOne(ctx, vote)
+	_, err := h.DB.Database.Collection("votes").InsertOne(ctx, vote)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to record vote")
 		return
@@ -269,7 +268,7 @@ func (h *Handler) SubmitVote(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateELORatings calculates and updates ELO ratings
-func (h *Handler) updateELORatings(modelAID, modelBID, winnerID primitive.ObjectID, modality string) {
+func (h *AIArenaHandler) updateELORatings(modelAID, modelBID, winnerID primitive.ObjectID, modality string) {
 	// This would run in background
 	// Get current ratings
 	// Calculate new ratings based on match result
@@ -278,7 +277,7 @@ func (h *Handler) updateELORatings(modelAID, modelBID, winnerID primitive.Object
 }
 
 // GetUserVotes handles GET /api/user/votes
-func (h *Handler) GetUserVotes(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetUserVotes(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	userID, ok := ctx.Value("user_id").(primitive.ObjectID)
@@ -287,8 +286,8 @@ func (h *Handler) GetUserVotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	page := parseInt(r.URL.Query().Get("page"), 1)
-	perPage := parseInt(r.URL.Query().Get("per_page"), 20)
+	page := atoi(r.URL.Query().Get("page"), 1)
+	perPage := atoi(r.URL.Query().Get("per_page"), 20)
 
 	skip := (page - 1) * perPage
 	findOptions := options.Find().
@@ -296,7 +295,7 @@ func (h *Handler) GetUserVotes(w http.ResponseWriter, r *http.Request) {
 		SetLimit(int64(perPage)).
 		SetSort(bson.M{"created_at": -1})
 
-	cursor, err := h.DB.Collection("votes").Find(ctx,
+	cursor, err := h.DB.Database.Collection("votes").Find(ctx,
 		bson.M{"user_id": userID}, findOptions)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch votes")
@@ -333,11 +332,11 @@ func calculateELO(ratingA, ratingB float64, scoreA float64) (newRatingA, newRati
 }
 
 // RecalculateELO handles POST /api/admin/elo/recalculate
-func (h *Handler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Reset all ELO ratings to 1200
-	_, err := h.DB.Collection("ai_models").UpdateMany(ctx,
+	_, err := h.DB.Database.Collection("ai_models").UpdateMany(ctx,
 		bson.M{},
 		bson.M{"$set": bson.M{
 			"elo_ratings.global": 1200,
@@ -355,10 +354,10 @@ func (h *Handler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Clear ELO history
-	_, _ = h.DB.Collection("elo_history").DeleteMany(ctx, bson.M{})
+	_, _ = h.DB.Database.Collection("elo_history").DeleteMany(ctx, bson.M{})
 
 	// Get all votes sorted by date
-	cursor, _ := h.DB.Collection("votes").Find(ctx, bson.M{},
+	cursor, _ := h.DB.Database.Collection("votes").Find(ctx, bson.M{},
 		options.Find().SetSort(bson.M{"created_at": 1}))
 
 	var votes []models.Vote
@@ -368,8 +367,8 @@ func (h *Handler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
 	for _, vote := range votes {
 		// Get current ratings
 		var modelA, modelB models.AIModel
-		h.DB.Collection("ai_models").FindOne(ctx, bson.M{"_id": vote.ModelAID}).Decode(&modelA)
-		h.DB.Collection("ai_models").FindOne(ctx, bson.M{"_id": vote.ModelBID}).Decode(&modelB)
+		h.DB.Database.Collection("ai_models").FindOne(ctx, bson.M{"_id": vote.ModelAID}).Decode(&modelA)
+		h.DB.Database.Collection("ai_models").FindOne(ctx, bson.M{"_id": vote.ModelBID}).Decode(&modelB)
 
 		// Determine score
 		var scoreA float64
@@ -392,10 +391,10 @@ func (h *Handler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
 		globalA, globalB := calculateELO(modelA.ELORatings.Global, modelB.ELORatings.Global, scoreA)
 
 		// Update global ratings
-		h.DB.Collection("ai_models").UpdateByID(ctx, vote.ModelAID, bson.M{
+		h.DB.Database.Collection("ai_models").UpdateByID(ctx, vote.ModelAID, bson.M{
 			"$set": bson.M{"elo_ratings.global": globalA},
 		})
-		h.DB.Collection("ai_models").UpdateByID(ctx, vote.ModelBID, bson.M{
+		h.DB.Database.Collection("ai_models").UpdateByID(ctx, vote.ModelBID, bson.M{
 			"$set": bson.M{"elo_ratings.global": globalB},
 		})
 
@@ -404,10 +403,10 @@ func (h *Handler) RecalculateELO(w http.ResponseWriter, r *http.Request) {
 		ratingB := modelB.GetELORating(vote.Modality)
 		newA, newB := calculateELO(ratingA, ratingB, scoreA)
 
-		h.DB.Collection("ai_models").UpdateByID(ctx, vote.ModelAID, bson.M{
+		h.DB.Database.Collection("ai_models").UpdateByID(ctx, vote.ModelAID, bson.M{
 			"$set": bson.M{"elo_ratings." + vote.Modality: newA},
 		})
-		h.DB.Collection("ai_models").UpdateByID(ctx, vote.ModelBID, bson.M{
+		h.DB.Database.Collection("ai_models").UpdateByID(ctx, vote.ModelBID, bson.M{
 			"$set": bson.M{"elo_ratings." + vote.Modality: newB},
 		})
 	}

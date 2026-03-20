@@ -350,6 +350,7 @@ func main() {
 	healthHandler.SetEmailService(emailService)
 	billingHandler := handlers.NewBillingHandler(stripeSvc, database, emitter, sysLogger, cfgStore)
 	billingHandler.SetTelemetry(telemetrySvc)
+	aiArenaHandler := handlers.NewAIArenaHandler(database)
 	promotionsHandler := handlers.NewPromotionsHandler(database, stripeSvc, cfgStore)
 	webhookHandler := handlers.NewWebhookHandler(stripeSvc, database, emitter, sysLogger, cfgStore.Get)
 	webhookHandler.SetTelemetry(telemetrySvc)
@@ -416,19 +417,19 @@ func main() {
 	api.HandleFunc("/branding/pages", brandingHandler.ListPublicPages).Methods("GET")
 
 	// AI Arena Public Routes (no auth required)
-	api.HandleFunc("/models", handler.GetModels).Methods("GET")
-	api.HandleFunc("/models/{slug}", handler.GetModel).Methods("GET")
-	api.HandleFunc("/models/compare", handler.CompareModels).Methods("GET")
-	api.HandleFunc("/providers", handler.GetProviders).Methods("GET")
-	api.HandleFunc("/benchmarks", handler.GetBenchmarks).Methods("GET")
-	api.HandleFunc("/benchmarks/categories", handler.GetBenchmarkCategories).Methods("GET")
-	api.HandleFunc("/benchmarks/{slug}/scores", handler.GetBenchmarkScores).Methods("GET")
-	api.HandleFunc("/leaderboard", handler.GetLeaderboard).Methods("GET")
-	api.HandleFunc("/battle-pair", handler.GetBattlePair).Methods("GET")
-	api.HandleFunc("/prompts", handler.GetPrompts).Methods("GET")
-	api.HandleFunc("/prompts/{slug}", handler.GetPrompt).Methods("GET")
-	api.HandleFunc("/prompts/modalities", handler.GetPromptModalities).Methods("GET")
-	api.HandleFunc("/prompts/segments", handler.GetPromptSegments).Methods("GET")
+	api.HandleFunc("/models", aiArenaHandler.GetModels).Methods("GET")
+	api.HandleFunc("/models/{slug}", aiArenaHandler.GetModel).Methods("GET")
+	api.HandleFunc("/models/compare", aiArenaHandler.CompareModels).Methods("GET")
+	api.HandleFunc("/providers", aiArenaHandler.GetProviders).Methods("GET")
+	api.HandleFunc("/benchmarks", aiArenaHandler.GetBenchmarks).Methods("GET")
+	api.HandleFunc("/benchmarks/categories", aiArenaHandler.GetBenchmarkCategories).Methods("GET")
+	api.HandleFunc("/benchmarks/{slug}/scores", aiArenaHandler.GetBenchmarkScores).Methods("GET")
+	api.HandleFunc("/leaderboard", aiArenaHandler.GetLeaderboard).Methods("GET")
+	api.HandleFunc("/battle-pair", aiArenaHandler.GetBattlePair).Methods("GET")
+	api.HandleFunc("/prompts", aiArenaHandler.GetPrompts).Methods("GET")
+	api.HandleFunc("/prompts/{slug}", aiArenaHandler.GetPrompt).Methods("GET")
+	api.HandleFunc("/prompts/modalities", aiArenaHandler.GetPromptModalities).Methods("GET")
+	api.HandleFunc("/prompts/segments", aiArenaHandler.GetPromptSegments).Methods("GET")
 
 	// --- Guarded routes (require system to be initialized) ---
 	guarded := api.PathPrefix("").Subrouter()
@@ -603,8 +604,8 @@ func main() {
 	// AI Arena Protected Routes (require auth)
 	aiarenaAPI := guarded.PathPrefix("").Subrouter()
 	aiarenaAPI.Use(authMiddleware.RequireAuth)
-	aiarenaAPI.HandleFunc("/vote", handler.SubmitVote).Methods("POST")
-	aiarenaAPI.HandleFunc("/user/votes", handler.GetUserVotes).Methods("GET")
+	aiarenaAPI.HandleFunc("/vote", aiArenaHandler.SubmitVote).Methods("POST")
+	aiarenaAPI.HandleFunc("/user/votes", aiArenaHandler.GetUserVotes).Methods("GET")
 
 	// Usage metering routes (require JWT + tenant + active billing)
 	usageAPI := guarded.PathPrefix("/usage").Subrouter()
@@ -781,30 +782,30 @@ func main() {
 	aiarenaAdmin := adminWrite.PathPrefix("").Subrouter()
 
 	// Models CRUD
-	aiarenaAdmin.HandleFunc("/ai-models", handler.CreateModel).Methods("POST")
-	aiarenaAdmin.HandleFunc("/ai-models/{id}", handler.UpdateModel).Methods("PUT")
-	aiarenaAdmin.HandleFunc("/ai-models/{id}", handler.DeleteModel).Methods("DELETE")
+	aiarenaAdmin.HandleFunc("/ai-models", aiArenaHandler.CreateModel).Methods("POST")
+	aiarenaAdmin.HandleFunc("/ai-models/{id}", aiArenaHandler.UpdateModel).Methods("PUT")
+	aiarenaAdmin.HandleFunc("/ai-models/{id}", aiArenaHandler.DeleteModel).Methods("DELETE")
 
 	// Benchmarks CRUD
-	aiarenaAdmin.HandleFunc("/benchmarks", handler.CreateBenchmark).Methods("POST")
-	aiarenaAdmin.HandleFunc("/benchmarks/{id}", handler.UpdateBenchmark).Methods("PUT")
-	aiarenaAdmin.HandleFunc("/benchmarks/{id}", handler.DeleteBenchmark).Methods("DELETE")
+	aiarenaAdmin.HandleFunc("/benchmarks", aiArenaHandler.CreateBenchmark).Methods("POST")
+	aiarenaAdmin.HandleFunc("/benchmarks/{id}", aiArenaHandler.UpdateBenchmark).Methods("PUT")
+	aiarenaAdmin.HandleFunc("/benchmarks/{id}", aiArenaHandler.DeleteBenchmark).Methods("DELETE")
 
 	// Scores CRUD
-	aiarenaAdmin.HandleFunc("/scores", handler.CreateBenchmarkScore).Methods("POST")
-	aiarenaAdmin.HandleFunc("/scores/{id}", handler.UpdateBenchmarkScore).Methods("PUT")
-	aiarenaAdmin.HandleFunc("/scores/{id}", handler.DeleteBenchmarkScore).Methods("DELETE")
+	aiarenaAdmin.HandleFunc("/scores", aiArenaHandler.CreateBenchmarkScore).Methods("POST")
+	aiarenaAdmin.HandleFunc("/scores/{id}", aiArenaHandler.UpdateBenchmarkScore).Methods("PUT")
+	aiarenaAdmin.HandleFunc("/scores/{id}", aiArenaHandler.DeleteBenchmarkScore).Methods("DELETE")
 
 	// Prompts CRUD
-	aiarenaAdmin.HandleFunc("/prompts", handler.CreatePrompt).Methods("POST")
-	aiarenaAdmin.HandleFunc("/prompts/{id}", handler.UpdatePrompt).Methods("PUT")
-	aiarenaAdmin.HandleFunc("/prompts/{id}", handler.DeletePrompt).Methods("DELETE")
+	aiarenaAdmin.HandleFunc("/prompts", aiArenaHandler.CreatePrompt).Methods("POST")
+	aiarenaAdmin.HandleFunc("/prompts/{id}", aiArenaHandler.UpdatePrompt).Methods("PUT")
+	aiarenaAdmin.HandleFunc("/prompts/{id}", aiArenaHandler.DeletePrompt).Methods("DELETE")
 
 	// ELO and Sync
-	aiarenaAdmin.HandleFunc("/elo/recalculate", handler.RecalculateELO).Methods("POST")
-	aiarenaAdmin.HandleFunc("/sync/openrouter", handler.OpenRouterSync).Methods("POST")
-	aiarenaAdmin.HandleFunc("/sync/logs", handler.GetSyncLogs).Methods("GET")
-	aiarenaAdmin.HandleFunc("/sync/status", handler.GetSyncStatus).Methods("GET")
+	aiarenaAdmin.HandleFunc("/elo/recalculate", aiArenaHandler.RecalculateELO).Methods("POST")
+	aiarenaAdmin.HandleFunc("/sync/openrouter", aiArenaHandler.OpenRouterSync).Methods("POST")
+	aiarenaAdmin.HandleFunc("/sync/logs", aiArenaHandler.GetSyncLogs).Methods("GET")
+	aiarenaAdmin.HandleFunc("/sync/status", aiArenaHandler.GetSyncStatus).Methods("GET")
 
 	// Owner-only admin actions (impersonate, delete users, branding, billing management)
 	adminOwner := adminAPI.PathPrefix("").Subrouter()

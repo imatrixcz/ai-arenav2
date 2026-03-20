@@ -10,17 +10,17 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/jonradoff/lastsaas/backend/internal/models"
+	"lastsaas/internal/models"
 )
 
 // GetPrompts handles GET /api/prompts
-func (h *Handler) GetPrompts(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetPrompts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	modality := r.URL.Query().Get("modality")
 	segment := r.URL.Query().Get("segment")
-	page := parseInt(r.URL.Query().Get("page"), 1)
-	perPage := parseInt(r.URL.Query().Get("per_page"), 20)
+	page := atoi(r.URL.Query().Get("page"), 1)
+	perPage := atoi(r.URL.Query().Get("per_page"), 20)
 
 	filter := bson.M{"is_active": true}
 	if modality != "" {
@@ -36,7 +36,7 @@ func (h *Handler) GetPrompts(w http.ResponseWriter, r *http.Request) {
 		SetLimit(int64(perPage)).
 		SetSort(bson.M{"created_at": -1})
 
-	cursor, err := h.DB.Collection("prompts").Find(ctx, filter, findOptions)
+	cursor, err := h.DB.Database.Collection("prompts").Find(ctx, filter, findOptions)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch prompts")
 		return
@@ -50,7 +50,7 @@ func (h *Handler) GetPrompts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Count total
-	total, _ := h.DB.Collection("prompts").CountDocuments(ctx, filter)
+	total, _ := h.DB.Database.Collection("prompts").CountDocuments(ctx, filter)
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
 		"prompts": prompts,
@@ -64,12 +64,12 @@ func (h *Handler) GetPrompts(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPrompt handles GET /api/prompts/:slug
-func (h *Handler) GetPrompt(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetPrompt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	slug := mux.Vars(r)["slug"]
 
 	var prompt models.Prompt
-	err := h.DB.Collection("prompts").FindOne(ctx, bson.M{"slug": slug}).Decode(&prompt)
+	err := h.DB.Database.Collection("prompts").FindOne(ctx, bson.M{"slug": slug}).Decode(&prompt)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "Prompt not found")
 		return
@@ -79,7 +79,7 @@ func (h *Handler) GetPrompt(w http.ResponseWriter, r *http.Request) {
 	enrichedOutputs := make([]map[string]interface{}, len(prompt.Outputs))
 	for i, output := range prompt.Outputs {
 		var model models.AIModel
-		h.DB.Collection("ai_models").FindOne(ctx,
+		h.DB.Database.Collection("ai_models").FindOne(ctx,
 			bson.M{"_id": output.ModelID}).Decode(&model)
 
 		enrichedOutputs[i] = map[string]interface{}{
@@ -106,7 +106,7 @@ func (h *Handler) GetPrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreatePrompt handles POST /api/admin/prompts
-func (h *Handler) CreatePrompt(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) CreatePrompt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Get user from context
@@ -128,7 +128,7 @@ func (h *Handler) CreatePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for duplicate
-	exists, _ := h.DB.Collection("prompts").CountDocuments(ctx, bson.M{"slug": req.Slug})
+	exists, _ := h.DB.Database.Collection("prompts").CountDocuments(ctx, bson.M{"slug": req.Slug})
 	if exists > 0 {
 		respondError(w, http.StatusConflict, "Prompt with this slug already exists")
 		return
@@ -137,15 +137,15 @@ func (h *Handler) CreatePrompt(w http.ResponseWriter, r *http.Request) {
 	req.ID = primitive.NewObjectID()
 	req.IsActive = true
 	req.CreatedBy = userID
-	req.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	req.CreatedAt = time.Now()
 	req.UpdatedAt = req.CreatedAt
 
 	// Set timestamps on outputs
 	for i := range req.Outputs {
-		req.Outputs[i].CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+		req.Outputs[i].CreatedAt = time.Now()
 	}
 
-	_, err := h.DB.Collection("prompts").InsertOne(ctx, req)
+	_, err := h.DB.Database.Collection("prompts").InsertOne(ctx, req)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to create prompt")
 		return
@@ -155,7 +155,7 @@ func (h *Handler) CreatePrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdatePrompt handles PUT /api/admin/prompts/:id
-func (h *Handler) UpdatePrompt(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -178,16 +178,16 @@ func (h *Handler) UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 			"modality":   req.Modality,
 			"segment":    req.Segment,
 			"is_active":  req.IsActive,
-			"updated_at": primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at": time.Now(),
 		},
 	}
 
 	// Update outputs if provided
 	if len(req.Outputs) > 0 {
-		update["$set"]["outputs"] = req.Outputs
+		update["$set"].(bson.M)["outputs"] = req.Outputs
 	}
 
-	_, err = h.DB.Collection("prompts").UpdateByID(ctx, objectID, update)
+	_, err = h.DB.Database.Collection("prompts").UpdateByID(ctx, objectID, update)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to update prompt")
 		return
@@ -197,7 +197,7 @@ func (h *Handler) UpdatePrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeletePrompt handles DELETE /api/admin/prompts/:id
-func (h *Handler) DeletePrompt(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) DeletePrompt(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -208,10 +208,10 @@ func (h *Handler) DeletePrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Soft delete
-	_, err = h.DB.Collection("prompts").UpdateByID(ctx, objectID, bson.M{
+	_, err = h.DB.Database.Collection("prompts").UpdateByID(ctx, objectID, bson.M{
 		"$set": bson.M{
 			"is_active":  false,
-			"updated_at": primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at": time.Now(),
 		},
 	})
 	if err != nil {
@@ -223,7 +223,7 @@ func (h *Handler) DeletePrompt(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPromptModalities handles GET /api/prompts/modalities
-func (h *Handler) GetPromptModalities(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetPromptModalities(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	pipeline := []bson.M{
@@ -232,7 +232,7 @@ func (h *Handler) GetPromptModalities(w http.ResponseWriter, r *http.Request) {
 		{"$sort": bson.M{"_id": 1}},
 	}
 
-	cursor, err := h.DB.Collection("prompts").Aggregate(ctx, pipeline)
+	cursor, err := h.DB.Database.Collection("prompts").Aggregate(ctx, pipeline)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch modalities")
 		return
@@ -246,7 +246,7 @@ func (h *Handler) GetPromptModalities(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetPromptSegments handles GET /api/prompts/segments
-func (h *Handler) GetPromptSegments(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetPromptSegments(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	pipeline := []bson.M{
@@ -255,7 +255,7 @@ func (h *Handler) GetPromptSegments(w http.ResponseWriter, r *http.Request) {
 		{"$sort": bson.M{"_id": 1}},
 	}
 
-	cursor, err := h.DB.Collection("prompts").Aggregate(ctx, pipeline)
+	cursor, err := h.DB.Database.Collection("prompts").Aggregate(ctx, pipeline)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch segments")
 		return

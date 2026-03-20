@@ -11,11 +11,11 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/jonradoff/lastsaas/backend/internal/models"
+	"lastsaas/internal/models"
 )
 
 // GetBenchmarks handles GET /api/benchmarks
-func (h *Handler) GetBenchmarks(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetBenchmarks(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	category := r.URL.Query().Get("category")
@@ -25,7 +25,7 @@ func (h *Handler) GetBenchmarks(w http.ResponseWriter, r *http.Request) {
 		filter["category"] = category
 	}
 
-	cursor, err := h.DB.Collection("benchmarks").Find(ctx, filter,
+	cursor, err := h.DB.Database.Collection("benchmarks").Find(ctx, filter,
 		options.Find().SetSort(bson.M{"category": 1, "name": 1}))
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch benchmarks")
@@ -43,7 +43,7 @@ func (h *Handler) GetBenchmarks(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetBenchmarkCategories handles GET /api/benchmarks/categories
-func (h *Handler) GetBenchmarkCategories(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetBenchmarkCategories(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	pipeline := []bson.M{
@@ -52,7 +52,7 @@ func (h *Handler) GetBenchmarkCategories(w http.ResponseWriter, r *http.Request)
 		{"$sort": bson.M{"_id": 1}},
 	}
 
-	cursor, err := h.DB.Collection("benchmarks").Aggregate(ctx, pipeline)
+	cursor, err := h.DB.Database.Collection("benchmarks").Aggregate(ctx, pipeline)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch categories")
 		return
@@ -66,13 +66,13 @@ func (h *Handler) GetBenchmarkCategories(w http.ResponseWriter, r *http.Request)
 }
 
 // GetBenchmarkScores handles GET /api/benchmarks/:slug/scores
-func (h *Handler) GetBenchmarkScores(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetBenchmarkScores(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	slug := mux.Vars(r)["slug"]
 
 	// Get benchmark
 	var benchmark models.Benchmark
-	err := h.DB.Collection("benchmarks").FindOne(ctx, bson.M{"slug": slug}).Decode(&benchmark)
+	err := h.DB.Database.Collection("benchmarks").FindOne(ctx, bson.M{"slug": slug}).Decode(&benchmark)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "Benchmark not found")
 		return
@@ -99,7 +99,7 @@ func (h *Handler) GetBenchmarkScores(w http.ResponseWriter, r *http.Request) {
 		{"$sort": bson.M{"score": -1}},
 	}
 
-	cursor, err := h.DB.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
+	cursor, err := h.DB.Database.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch scores")
 		return
@@ -116,7 +116,7 @@ func (h *Handler) GetBenchmarkScores(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateBenchmark handles POST /api/admin/benchmarks
-func (h *Handler) CreateBenchmark(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) CreateBenchmark(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req models.Benchmark
@@ -131,7 +131,7 @@ func (h *Handler) CreateBenchmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for duplicate
-	exists, _ := h.DB.Collection("benchmarks").CountDocuments(ctx, bson.M{"slug": req.Slug})
+	exists, _ := h.DB.Database.Collection("benchmarks").CountDocuments(ctx, bson.M{"slug": req.Slug})
 	if exists > 0 {
 		respondError(w, http.StatusConflict, "Benchmark with this slug already exists")
 		return
@@ -139,10 +139,10 @@ func (h *Handler) CreateBenchmark(w http.ResponseWriter, r *http.Request) {
 
 	req.ID = primitive.NewObjectID()
 	req.IsActive = true
-	req.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	req.CreatedAt = time.Now()
 	req.UpdatedAt = req.CreatedAt
 
-	_, err := h.DB.Collection("benchmarks").InsertOne(ctx, req)
+	_, err := h.DB.Database.Collection("benchmarks").InsertOne(ctx, req)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to create benchmark")
 		return
@@ -152,7 +152,7 @@ func (h *Handler) CreateBenchmark(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateBenchmark handles PUT /api/admin/benchmarks/:id
-func (h *Handler) UpdateBenchmark(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) UpdateBenchmark(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -175,11 +175,11 @@ func (h *Handler) UpdateBenchmark(w http.ResponseWriter, r *http.Request) {
 			"description": req.Description,
 			"url":         req.URL,
 			"is_active":   req.IsActive,
-			"updated_at":  primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at":  time.Now(),
 		},
 	}
 
-	_, err = h.DB.Collection("benchmarks").UpdateByID(ctx, objectID, update)
+	_, err = h.DB.Database.Collection("benchmarks").UpdateByID(ctx, objectID, update)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to update benchmark")
 		return
@@ -189,7 +189,7 @@ func (h *Handler) UpdateBenchmark(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteBenchmark handles DELETE /api/admin/benchmarks/:id
-func (h *Handler) DeleteBenchmark(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) DeleteBenchmark(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -200,9 +200,9 @@ func (h *Handler) DeleteBenchmark(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Also delete associated scores
-	_, _ = h.DB.Collection("model_benchmark_scores").DeleteMany(ctx, bson.M{"benchmark_id": objectID})
+	_, _ = h.DB.Database.Collection("model_benchmark_scores").DeleteMany(ctx, bson.M{"benchmark_id": objectID})
 
-	_, err = h.DB.Collection("benchmarks").DeleteOne(ctx, bson.M{"_id": objectID})
+	_, err = h.DB.Database.Collection("benchmarks").DeleteOne(ctx, bson.M{"_id": objectID})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to delete benchmark")
 		return
@@ -212,7 +212,7 @@ func (h *Handler) DeleteBenchmark(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateBenchmarkScore handles POST /api/admin/scores
-func (h *Handler) CreateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) CreateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req models.ModelBenchmarkScore
@@ -223,7 +223,7 @@ func (h *Handler) CreateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 
 	req.ID = primitive.NewObjectID()
 	req.Source = "manual"
-	req.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	req.CreatedAt = time.Now()
 	req.UpdatedAt = req.CreatedAt
 
 	// Format score for display
@@ -231,7 +231,7 @@ func (h *Handler) CreateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 		req.ScoreFormatted = formatScore(req.Score)
 	}
 
-	_, err := h.DB.Collection("model_benchmark_scores").InsertOne(ctx, req)
+	_, err := h.DB.Database.Collection("model_benchmark_scores").InsertOne(ctx, req)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to create score")
 		return
@@ -241,7 +241,7 @@ func (h *Handler) CreateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateBenchmarkScore handles PUT /api/admin/scores/:id
-func (h *Handler) UpdateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) UpdateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -265,11 +265,11 @@ func (h *Handler) UpdateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 			"source":          req.Source,
 			"url":             req.URL,
 			"notes":           req.Notes,
-			"updated_at":      primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at":      time.Now(),
 		},
 	}
 
-	_, err = h.DB.Collection("model_benchmark_scores").UpdateByID(ctx, objectID, update)
+	_, err = h.DB.Database.Collection("model_benchmark_scores").UpdateByID(ctx, objectID, update)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to update score")
 		return
@@ -279,7 +279,7 @@ func (h *Handler) UpdateBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteBenchmarkScore handles DELETE /api/admin/scores/:id
-func (h *Handler) DeleteBenchmarkScore(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) DeleteBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -289,7 +289,7 @@ func (h *Handler) DeleteBenchmarkScore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = h.DB.Collection("model_benchmark_scores").DeleteOne(ctx, bson.M{"_id": objectID})
+	_, err = h.DB.Database.Collection("model_benchmark_scores").DeleteOne(ctx, bson.M{"_id": objectID})
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to delete score")
 		return

@@ -11,19 +11,19 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo/options"
 
-	"github.com/jonradoff/lastsaas/backend/internal/models"
+	"lastsaas/internal/models"
 )
 
 // GetModels handles GET /api/models - list all models
-func (h *Handler) GetModels(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Parse query params
 	query := r.URL.Query()
 	provider := query.Get("provider")
 	search := query.Get("search")
-	page := parseInt(query.Get("page"), 1)
-	perPage := parseInt(query.Get("per_page"), 20)
+	page := atoi(query.Get("page"), 1)
+	perPage := atoi(query.Get("per_page"), 20)
 
 	// Build filter
 	filter := bson.M{"is_active": true}
@@ -45,24 +45,24 @@ func (h *Handler) GetModels(w http.ResponseWriter, r *http.Request) {
 		SetSort(bson.M{"elo_ratings.global": -1})
 
 	// Query
-	cursor, err := h.DB.Collection("ai_models").Find(ctx, filter, findOptions)
+	cursor, err := h.DB.Database.Collection("ai_models").Find(ctx, filter, findOptions)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch models")
 		return
 	}
 	defer cursor.Close(ctx)
 
-	var models []models.AIModel
-	if err = cursor.All(ctx, &models); err != nil {
+	var aiModels []models.AIModel
+	if err = cursor.All(ctx, &aiModels); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to decode models")
 		return
 	}
 
 	// Count total
-	total, _ := h.DB.Collection("ai_models").CountDocuments(ctx, filter)
+	total, _ := h.DB.Database.Collection("ai_models").CountDocuments(ctx, filter)
 
 	respondJSON(w, http.StatusOK, map[string]interface{}{
-		"models": models,
+		"models": aiModels,
 		"pagination": map[string]int{
 			"page":     page,
 			"per_page": perPage,
@@ -73,12 +73,12 @@ func (h *Handler) GetModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetModel handles GET /api/models/:slug - get single model
-func (h *Handler) GetModel(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetModel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	slug := mux.Vars(r)["slug"]
 
 	var model models.AIModel
-	err := h.DB.Collection("ai_models").FindOne(ctx, bson.M{"slug": slug}).Decode(&model)
+	err := h.DB.Database.Collection("ai_models").FindOne(ctx, bson.M{"slug": slug}).Decode(&model)
 	if err != nil {
 		respondError(w, http.StatusNotFound, "Model not found")
 		return
@@ -104,7 +104,7 @@ func (h *Handler) GetModel(w http.ResponseWriter, r *http.Request) {
 		}},
 	}
 
-	cursor, _ := h.DB.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
+	cursor, _ := h.DB.Database.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
 	var scores []models.BenchmarkScoreWithDetails
 	cursor.All(ctx, &scores)
 
@@ -115,7 +115,7 @@ func (h *Handler) GetModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // CompareModels handles GET /api/models/compare - compare multiple models
-func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) CompareModels(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	slugs := r.URL.Query()["slugs"]
@@ -125,7 +125,7 @@ func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch models
-	cursor, err := h.DB.Collection("ai_models").Find(ctx, bson.M{
+	cursor, err := h.DB.Database.Collection("ai_models").Find(ctx, bson.M{
 		"slug":      bson.M{"$in": slugs},
 		"is_active": true,
 	})
@@ -135,8 +135,8 @@ func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
 	}
 	defer cursor.Close(ctx)
 
-	var models []models.AIModel
-	if err = cursor.All(ctx, &models); err != nil {
+	var aiModels []models.AIModel
+	if err = cursor.All(ctx, &aiModels); err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to decode models")
 		return
 	}
@@ -148,8 +148,8 @@ func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sort models by slug order
-	sorted := make([]models.AIModel, len(models))
-	for _, m := range models {
+	sorted := make([]models.AIModel, len(aiModels))
+	for _, m := range aiModels {
 		if idx, ok := slugMap[m.Slug]; ok {
 			sorted[idx] = m
 		}
@@ -193,7 +193,7 @@ func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
 		{"$sort": bson.M{"_id.category": 1, "_id.name": 1}},
 	}
 
-	benchCursor, _ := h.DB.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
+	benchCursor, _ := h.DB.Database.Collection("model_benchmark_scores").Aggregate(ctx, pipeline)
 	var benchmarkData []map[string]interface{}
 	benchCursor.All(ctx, &benchmarkData)
 
@@ -204,7 +204,7 @@ func (h *Handler) CompareModels(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetProviders handles GET /api/providers - list all providers
-func (h *Handler) GetProviders(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) GetProviders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	pipeline := []bson.M{
@@ -216,7 +216,7 @@ func (h *Handler) GetProviders(w http.ResponseWriter, r *http.Request) {
 		{"$sort": bson.M{"_id": 1}},
 	}
 
-	cursor, err := h.DB.Collection("ai_models").Aggregate(ctx, pipeline)
+	cursor, err := h.DB.Database.Collection("ai_models").Aggregate(ctx, pipeline)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to fetch providers")
 		return
@@ -230,7 +230,7 @@ func (h *Handler) GetProviders(w http.ResponseWriter, r *http.Request) {
 }
 
 // CreateModel handles POST /api/admin/models - create new model (admin only)
-func (h *Handler) CreateModel(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) CreateModel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	var req models.AIModel
@@ -245,7 +245,7 @@ func (h *Handler) CreateModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check for duplicate slug
-	exists, _ := h.DB.Collection("ai_models").CountDocuments(ctx, bson.M{"slug": req.Slug})
+	exists, _ := h.DB.Database.Collection("ai_models").CountDocuments(ctx, bson.M{"slug": req.Slug})
 	if exists > 0 {
 		respondError(w, http.StatusConflict, "Model with this slug already exists")
 		return
@@ -255,7 +255,7 @@ func (h *Handler) CreateModel(w http.ResponseWriter, r *http.Request) {
 	req.ID = primitive.NewObjectID()
 	req.Source = "manual"
 	req.IsActive = true
-	req.CreatedAt = primitive.NewDateTimeFromTime(time.Now())
+	req.CreatedAt = time.Now()
 	req.UpdatedAt = req.CreatedAt
 
 	// Default ELO ratings
@@ -267,7 +267,7 @@ func (h *Handler) CreateModel(w http.ResponseWriter, r *http.Request) {
 	req.ELORatings.Text = 1200
 	req.ELORatings.Vision = 1200
 
-	_, err := h.DB.Collection("ai_models").InsertOne(ctx, req)
+	_, err := h.DB.Database.Collection("ai_models").InsertOne(ctx, req)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to create model")
 		return
@@ -277,7 +277,7 @@ func (h *Handler) CreateModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // UpdateModel handles PUT /api/admin/models/:id - update model (admin only)
-func (h *Handler) UpdateModel(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) UpdateModel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -310,11 +310,11 @@ func (h *Handler) UpdateModel(w http.ResponseWriter, r *http.Request) {
 			"release_date":      req.ReleaseDate,
 			"version":           req.Version,
 			"manual_override":   true,
-			"updated_at":        primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at":        time.Now(),
 		},
 	}
 
-	_, err = h.DB.Collection("ai_models").UpdateByID(ctx, objectID, update)
+	_, err = h.DB.Database.Collection("ai_models").UpdateByID(ctx, objectID, update)
 	if err != nil {
 		respondError(w, http.StatusInternalServerError, "Failed to update model")
 		return
@@ -324,7 +324,7 @@ func (h *Handler) UpdateModel(w http.ResponseWriter, r *http.Request) {
 }
 
 // DeleteModel handles DELETE /api/admin/models/:id - deactivate model (admin only)
-func (h *Handler) DeleteModel(w http.ResponseWriter, r *http.Request) {
+func (h *AIArenaHandler) DeleteModel(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	id := mux.Vars(r)["id"]
 
@@ -335,10 +335,10 @@ func (h *Handler) DeleteModel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Soft delete - just mark as inactive
-	_, err = h.DB.Collection("ai_models").UpdateByID(ctx, objectID, bson.M{
+	_, err = h.DB.Database.Collection("ai_models").UpdateByID(ctx, objectID, bson.M{
 		"$set": bson.M{
 			"is_active":  false,
-			"updated_at": primitive.NewDateTimeFromTime(time.Now()),
+			"updated_at": time.Now(),
 		},
 	})
 	if err != nil {

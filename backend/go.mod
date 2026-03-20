@@ -1,21 +1,24 @@
 module lastsaas
 
-go 1.25
+go 1.23.0
+
+toolchain go1.23.2
 
 require (
-	github.com/go-playground/validator/v10 v10.30.1
+	github.com/go-playground/validator/v10 v10.22.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/gorilla/mux v1.8.1
 	github.com/jung-kurt/gofpdf v1.16.2
 	github.com/mark3labs/mcp-go v0.44.0
 	github.com/pquerna/otp v1.5.0
 	github.com/rs/cors v1.11.1
-	github.com/shirou/gopsutil/v4 v4.26.1
+	github.com/shirou/gopsutil/v4 v4.24.11
 	github.com/stripe/stripe-go/v82 v82.5.1
 	go.mongodb.org/mongo-driver v1.17.9
-	golang.org/x/crypto v0.46.0
-	golang.org/x/oauth2 v0.35.0
-	golang.org/x/term v0.38.0
+	golang.org/x/crypto v0.31.0
+	golang.org/x/oauth2 v0.24.0
+	golang.org/x/sync v0.10.0
+	golang.org/x/term v0.27.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -39,8 +42,8 @@ require (
 	github.com/montanaflynn/stats v0.7.1 // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
-	github.com/tklauser/go-sysconf v0.3.16 // indirect
-	github.com/tklauser/numcpus v0.11.0 // indirect
+	github.com/tklauser/go-sysconf v0.3.14 // indirect
+	github.com/tklauser/numcpus v0.9.0 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect
 	github.com/xdg-go/scram v1.1.2 // indirect
@@ -48,8 +51,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/youmark/pkcs8 v0.0.0-20240726163527-a2c0da244d78 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.32.0 // indirect
+	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/text v0.21.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

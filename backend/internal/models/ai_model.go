@@ -20,17 +20,7 @@ type AIModel struct {
 	MaxOutputTokens int64 `bson:"max_output_tokens" json:"max_output_tokens"`
 
 	// Pricing (in USD per 1M tokens)
-	Pricing struct {
-		Prompt     float64 `bson:"prompt" json:"prompt"`
-		Completion float64 `bson:"completion" json:"completion"`
-		Image      float64 `bson:"image" json:"image"`
-		Tiers      []struct {
-			Threshold       int64   `bson:"threshold" json:"threshold"`
-			PromptPrice     float64 `bson:"prompt_price" json:"prompt_price"`
-			CompletionPrice float64 `bson:"completion_price" json:"completion_price"`
-			Label           string  `bson:"label" json:"label"`
-		} `bson:"tiers" json:"tiers"`
-	} `bson:"pricing" json:"pricing"`
+	Pricing AIModelPricing `bson:"pricing" json:"pricing"`
 
 	// Architecture
 	Modalities   []string `bson:"modalities" json:"modalities"`
@@ -44,15 +34,7 @@ type AIModel struct {
 	Version     string    `bson:"version" json:"version"`
 
 	// ELO Ratings (7 categories)
-	ELORatings struct {
-		Global float64 `bson:"global" json:"global"`
-		Code   float64 `bson:"code" json:"code"`
-		Image  float64 `bson:"image" json:"image"`
-		Video  float64 `bson:"video" json:"video"`
-		Audio  float64 `bson:"audio" json:"audio"`
-		Text   float64 `bson:"text" json:"text"`
-		Vision float64 `bson:"vision" json:"vision"`
-	} `bson:"elo_ratings" json:"elo_ratings"`
+	ELORatings AIModelELORatings `bson:"elo_ratings" json:"elo_ratings"`
 
 	// Sync info
 	Source         string    `bson:"source" json:"source" validate:"required,oneof=openrouter manual"`
@@ -62,6 +44,30 @@ type AIModel struct {
 	// Timestamps
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 	UpdatedAt time.Time `bson:"updated_at" json:"updated_at"`
+}
+
+// AIModelPricing represents pricing structure
+type AIModelPricing struct {
+	Prompt     float64 `bson:"prompt" json:"prompt"`
+	Completion float64 `bson:"completion" json:"completion"`
+	Image      float64 `bson:"image" json:"image"`
+	Tiers      []struct {
+		Threshold       int64   `bson:"threshold" json:"threshold"`
+		PromptPrice     float64 `bson:"prompt_price" json:"prompt_price"`
+		CompletionPrice float64 `bson:"completion_price" json:"completion_price"`
+		Label           string  `bson:"label" json:"label"`
+	} `bson:"tiers" json:"tiers"`
+}
+
+// AIModelELORatings represents ELO ratings for different modalities
+type AIModelELORatings struct {
+	Global float64 `bson:"global" json:"global"`
+	Code   float64 `bson:"code" json:"code"`
+	Image  float64 `bson:"image" json:"image"`
+	Video  float64 `bson:"video" json:"video"`
+	Audio  float64 `bson:"audio" json:"audio"`
+	Text   float64 `bson:"text" json:"text"`
+	Vision float64 `bson:"vision" json:"vision"`
 }
 
 // GetELORating returns ELO rating for specific modality
