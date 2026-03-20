@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aiarenav2-app
+    ports:
+      - "4290:4290"
+    environment:
+      - DATABASE_NAME=aiarena
+      - MONGODB_URI=mongodb://mongodb:27017
+      - REDIS_URI=redis:6379
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:-changeme-access}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:-changeme-refresh}
+      - FRONTEND_URL=http://localhost:4290
+      - APP_NAME=AI Arena
+      - LASTSAAS_ENV=dev
+    depends_on:
+      - mongodb
+      - redis
+    networks:
+      - aiarena
+    volumes:
+      - ./uploads:/app/uploads
+
+  mongodb:
+    image: mongo:7
+    container_name: aiarenav2-mongodb
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - aiarena
+
+  redis:
+    image: redis:7-alpine
+    container_name: aiarenav2-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - aiarena
+
+  # Optional: MongoDB UI
+  mongo-express:
+    image: mongo-express:latest
+    container_name: aiarenav2-mongo-express
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - ME_CONFIG_MONGODB_URL=mongodb://mongodb:27017/
+      - ME_CONFIG_BASICAUTH_USERNAME=admin
+      - ME_CONFIG_BASICAUTH_PASSWORD=admin
+    depends_on:
+      - mongodb
+    networks:
+      - aiarena
+
+volumes:
+  mongodb_data:
+  redis_data:
+  uploads:
+
+networks:
+  aiarena:
+    driver: bridge
