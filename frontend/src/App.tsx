@@ -61,6 +61,12 @@ const AdminPMPage = lazy(() => import('./pages/admin/PMPage'));
 import LandingPage from './pages/public/LandingPage';
 import CustomPage from './pages/public/CustomPage';
 
+// AI Arena pages (lazy-loaded)
+const ModelsListPage = lazy(() => import('./pages/public/aiarena/ModelsList'));
+const ModelComparisonPage = lazy(() => import('./pages/public/aiarena/ModelComparison'));
+const LeaderboardPage = lazy(() => import('./pages/public/aiarena/Leaderboard'));
+const BattlePage = lazy(() => import('./pages/public/aiarena/Battle'));
+
 function LazyFallback() {
   return (
     <div className="flex items-center justify-center py-20">
@@ -132,6 +138,13 @@ export default function App() {
                   <Routes>
                     {/* Public landing page */}
                     <Route path="/" element={<LandingPage />} />
+
+                    {/* AI Arena Public Routes */}
+                    <Route path="/models" element={<Suspense fallback={<LazyFallback />}><ModelsListPage /></Suspense>} />
+                    <Route path="/models/:slug" element={<Suspense fallback={<LazyFallback />}><ModelsListPage /></Suspense>} />
+                    <Route path="/compare/:slugs" element={<Suspense fallback={<LazyFallback />}><ModelComparisonPage /></Suspense>} />
+                    <Route path="/leaderboard" element={<Suspense fallback={<LazyFallback />}><LeaderboardPage /></Suspense>} />
+                    <Route path="/battle" element={<Suspense fallback={<LazyFallback />}><BattlePage /></Suspense>} />
 
                     {/* Public custom pages */}
                     <Route path="/p/:slug" element={<CustomPage />} />
