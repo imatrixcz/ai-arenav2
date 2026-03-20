@@ -152,7 +152,7 @@ APP_NAME=AI Arena
 ## 🚧 Remaining Tasks
 
 ### Backend
-1. [ ] Opravit build errors (Go 1.25 required)
+1. [x] Opravit build errors (Go 1.23 kompatibilita) - ✓ HOTOVÉ
 2. [ ] Přidat MongoDB schemata validace
 3. [ ] Redis cache pro leaderboard
 4. [ ] Rate limiting pro battle/votes
